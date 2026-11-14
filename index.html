@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5"
+    />
+    <meta name="theme-color" content="#FAF6EF" />
+    <meta name="description" content="Organizá las cenas de la semana según la dificultad que tengas ganas de cocinar." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Comidas" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <title>Comidas · menú semanal</title>
+    <script>
+      // Aplica el tema antes de cargar el CSS/JS para que no haya destello.
+      try {
+        var savedTheme = localStorage.getItem('comidas:theme')
+        var themeColors = { cool: '#EEF3FA', oscuro: '#0F1512' }
+        if (savedTheme === 'cool' || savedTheme === 'oscuro') {
+          document.documentElement.dataset.theme = savedTheme
+          var themeMeta = document.querySelector('meta[name="theme-color"]')
+          if (themeMeta) themeMeta.setAttribute('content', themeColors[savedTheme])
+        }
+      } catch (error) {
+        /* sin localStorage: se usa el tema clásico */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

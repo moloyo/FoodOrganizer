@@ -1,0 +1,80 @@
+-- ============================================================
+--  Comidas · esquema para Supabase
+--  Ejecutá este archivo completo en el SQL Editor del proyecto.
+--  Es idempotente: podés correrlo más de una vez.
+-- ============================================================
+
+create extension if not exists pgcrypto;
+
+-- ------------------------------------------------------------
+--  Platos (recetario)
+-- ------------------------------------------------------------
+create table if not exists public.dishes (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null references auth.users (id) on delete cascade,
+  name              text not null,
+  difficulty        text not null check (difficulty in ('muy-facil', 'facil', 'media', 'elaborada')),
+  minutes           integer,
+  freezer_friendly  boolean not null default false,
+  favorite          boolean not null default false,
+  tags              text[] not null default '{}',
+  ingredients       jsonb not null default '[]'::jsonb,
+  steps             text not null default '',
+  source_url        text not null default '',
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists dishes_user_idx on public.dishes (user_id, created_at desc);
+
+-- ------------------------------------------------------------
+--  Planificación: una fila por día de cada semana
+--  week_start = lunes de esa semana (yyyy-mm-dd), day = 0..6
+-- ------------------------------------------------------------
+create table if not exists public.plans (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  week_start  date not null,
+  day         smallint not null check (day between 0 and 6),
+  mode        text check (mode in ('freezer', 'muy-facil', 'facil', 'media', 'elaborada')),
+  dish_id     uuid references public.dishes (id) on delete set null,
+  note        text not null default '',
+  created_at  timestamptz not null default now(),
+  unique (user_id, week_start, day)
+);
+
+create index if not exists plans_user_week_idx on public.plans (user_id, week_start);
+
+-- ------------------------------------------------------------
+--  Lista de compras por semana
+-- ------------------------------------------------------------
+create table if not exists public.shopping_items (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  week_start  date not null,
+  text        text not null,
+  checked     boolean not null default false,
+  category    text not null default 'Otros',
+  dish_id     uuid references public.dishes (id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists shopping_user_week_idx on public.shopping_items (user_id, week_start);
+
+-- ------------------------------------------------------------
+--  Seguridad a nivel de fila: cada usuario solo ve lo suyo
+-- ------------------------------------------------------------
+alter table public.dishes enable row level security;
+alter table public.plans enable row level security;
+alter table public.shopping_items enable row level security;
+
+drop policy if exists "dishes_owner_all" on public.dishes;
+create policy "dishes_owner_all" on public.dishes
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "plans_owner_all" on public.plans;
+create policy "plans_owner_all" on public.plans
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "shopping_owner_all" on public.shopping_items;
+create policy "shopping_owner_all" on public.shopping_items
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

@@ -1,0 +1,298 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces Variable", "Iowan Old Style", Georgia, serif;
+
+  --color-cream: #faf6ef;
+  --color-surface: #ffffff;
+  --color-ink: #17251d;
+  --color-muted: #6b7a70;
+  --color-line: #e9e1d4;
+  --color-line-strong: #d9cfbd;
+
+  --color-brand: #2f6a4f;
+  --color-brand-dark: #23503c;
+  --color-brand-soft: #e3efe6;
+  --color-on-brand: #ffffff;
+
+  --color-accent: #d9763d;
+  --color-accent-soft: #fbe9db;
+
+  --color-field: #fffdfa;
+
+  --color-favorite: #c98a2e;
+  --color-favorite-soft: #fbf0da;
+  --color-favorite-ink: #8f5e12;
+
+  --color-danger-soft: #f8e4de;
+  --color-danger-ink: #a8443f;
+  --color-danger-strong: #8f3a2f;
+  --color-danger-border: #e7c3b8;
+
+  --color-success-soft: #f1f8f2;
+  --color-success-ink: #23503c;
+  --color-success-border: #c9ddcf;
+
+  --shadow-card: 0 1px 2px rgba(23, 37, 29, 0.04), 0 8px 24px -16px rgba(23, 37, 29, 0.25);
+  --shadow-float: 0 10px 40px -12px rgba(23, 37, 29, 0.28);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Temas: clásico (por defecto), cool y oscuro                        */
+/*  Se activan con <html data-theme="cool|oscuro">. Las utilidades de  */
+/*  Tailwind leen estas variables, así que alcanza con redeclararlas.  */
+/* ------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light;
+  --body-glow:
+    radial-gradient(60rem 40rem at 110% -10%, rgba(227, 239, 230, 0.9), transparent 60%),
+    radial-gradient(50rem 30rem at -20% 0%, rgba(251, 233, 219, 0.7), transparent 55%);
+
+  --mode-freezer: #3e7cb1;
+  --mode-freezer-soft: #e7f0f8;
+  --mode-muy-facil: #2f6a4f;
+  --mode-muy-facil-soft: #e3efe6;
+  --mode-facil: #5c8a3a;
+  --mode-facil-soft: #edf3e0;
+  --mode-media: #c98a2e;
+  --mode-media-soft: #fbf0da;
+  --mode-elaborada: #b4553f;
+  --mode-elaborada-soft: #f8e4de;
+}
+
+/* Cool · claro, azul y moderno */
+html[data-theme='cool'] {
+  color-scheme: light;
+
+  --color-cream: #eef3fa;
+  --color-surface: #ffffff;
+  --color-ink: #16202c;
+  --color-muted: #5d7186;
+  --color-line: #e2e9f2;
+  --color-line-strong: #cbd7e6;
+
+  --color-brand: #2563eb;
+  --color-brand-dark: #1d4ed8;
+  --color-brand-soft: #e4edfd;
+  --color-on-brand: #ffffff;
+
+  --color-accent: #0d9488;
+  --color-accent-soft: #dcf3ef;
+
+  --color-field: #f8fbff;
+
+  --color-favorite: #c98a2e;
+  --color-favorite-soft: #fbf0da;
+  --color-favorite-ink: #8f5e12;
+
+  --color-danger-soft: #fbe7e4;
+  --color-danger-ink: #b0443c;
+  --color-danger-strong: #953831;
+  --color-danger-border: #e8c1bc;
+
+  --color-success-soft: #e7f5f0;
+  --color-success-ink: #146353;
+  --color-success-border: #bfe3d8;
+
+  --shadow-card: 0 1px 2px rgba(22, 40, 70, 0.05), 0 8px 24px -16px rgba(22, 40, 70, 0.25);
+  --shadow-float: 0 10px 40px -12px rgba(22, 40, 70, 0.3);
+
+  --body-glow:
+    radial-gradient(60rem 40rem at 110% -10%, rgba(219, 234, 254, 0.95), transparent 60%),
+    radial-gradient(50rem 30rem at -20% 0%, rgba(204, 251, 241, 0.8), transparent 55%);
+}
+
+/* Oscuro · verde profundo, para la noche */
+html[data-theme='oscuro'] {
+  color-scheme: dark;
+
+  --color-cream: #0f1512;
+  --color-surface: #17201b;
+  --color-ink: #e7efe9;
+  --color-muted: #94a69b;
+  --color-line: #27332c;
+  --color-line-strong: #3a4a41;
+
+  --color-brand: #5db98d;
+  --color-brand-dark: #92dcb7;
+  --color-brand-soft: #1c352a;
+  --color-on-brand: #081410;
+
+  --color-accent: #e98a5d;
+  --color-accent-soft: #3a261d;
+
+  --color-field: #121a16;
+
+  --color-favorite: #e0b060;
+  --color-favorite-soft: #352c1b;
+  --color-favorite-ink: #f0c97f;
+
+  --color-danger-soft: #3a211e;
+  --color-danger-ink: #f09a8d;
+  --color-danger-strong: #ffc9c0;
+  --color-danger-border: #5b3531;
+
+  --color-success-soft: #1b3428;
+  --color-success-ink: #9adcb6;
+  --color-success-border: #2f5743;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px -16px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 10px 40px -12px rgba(0, 0, 0, 0.65);
+
+  --body-glow:
+    radial-gradient(60rem 40rem at 110% -10%, rgba(36, 82, 58, 0.55), transparent 60%),
+    radial-gradient(50rem 30rem at -20% 0%, rgba(74, 55, 28, 0.35), transparent 55%);
+
+  --mode-freezer: #7fb6e6;
+  --mode-freezer-soft: #1b2c3e;
+  --mode-muy-facil: #7ed3a6;
+  --mode-muy-facil-soft: #173228;
+  --mode-facil: #a4cf7a;
+  --mode-facil-soft: #24331b;
+  --mode-media: #e6b467;
+  --mode-media-soft: #372c1a;
+  --mode-elaborada: #e58f7b;
+  --mode-elaborada-soft: #3a221d;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-cream);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    background-image: var(--body-glow);
+    background-attachment: fixed;
+    overscroll-behavior-y: none;
+  }
+
+  ::selection {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-dark);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  input,
+  textarea,
+  select {
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--color-brand) 70%, var(--color-surface));
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 1.25rem;
+    box-shadow: var(--shadow-card);
+  }
+
+  .field {
+    width: 100%;
+    border-radius: 0.85rem;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-field);
+    padding: 0.7rem 0.85rem;
+    font-size: 0.95rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .field::placeholder {
+    color: color-mix(in oklab, var(--color-muted) 72%, var(--color-surface));
+  }
+
+  .field:focus {
+    outline: none;
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand) 16%, transparent);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.96);
+  }
+  60% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-fade {
+  animation: fade-in 0.18s ease-out both;
+}
+.animate-sheet {
+  animation: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-rise {
+  animation: rise 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-pop {
+  animation: pop 0.28s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

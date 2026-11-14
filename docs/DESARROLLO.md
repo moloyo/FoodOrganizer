@@ -1,0 +1,454 @@
+# Guía de desarrollo · Comidas
+
+> Última revisión: **14 de noviembre de 2026**.
+> Para el estado actual, pendientes y bitácora, ver [`ESTADO.md`](ESTADO.md).
+
+## Retomar el proyecto en 5 minutos
+
+1. Abrí una terminal en la raíz del repo.
+2. Si es otra máquina o cambió `package.json`: `npm install`.
+3. Iniciá el servidor: `npm run dev` → <http://localhost:5173>.
+4. Sin `.env.local` la app arranca en **modo local** con 20 platos de ejemplo.
+5. Antes de cambiar código, confirmá que compila: `npm run build`.
+6. Leé [`ESTADO.md`](ESTADO.md) para saber qué está hecho y qué sigue.
+
+> **Nota (Windows + npm 12):** en este entorno `npm run dev -- --port 5173` no siempre pasa el
+> puerto. Si pasa, usá `npx vite --port 5173 --strictPort`.
+
+## Stack
+
+- **React 19** + **TypeScript** + **Vite**
+- **Tailwind CSS v4** (configurado con `@theme` en `src/index.css`, sin `tailwind.config`)
+- **vite-plugin-pwa** (service worker y manifest)
+- **Supabase** (opcional, solo para cuentas y sincronización)
+- **date-fns** (fechas en español, semana que empieza lunes)
+- **lucide-react** (íconos), **clsx** (clases)
+- Tipografías **Fraunces** (títulos) e **Inter** (texto), empaquetadas con `@fontsource-variable`.
+
+## Comandos
+
+| Comando | Qué hace |
+| --- | --- |
+| `npm run dev` | Servidor de desarrollo en el puerto 5173. |
+| `npm run build` | Type-check (`tsc -b`) + build de producción en `dist/`. |
+| `npm run preview` | Sirve `dist/` para probar el build y la PWA. |
+| `npm run icons` | Regenera los íconos PWA en `public/icons/` (usa `sharp`). |
+| `npm install` | Instala dependencias. |
+
+No hay linter ni suite de tests automatizada en el repo (ver “Verificación manual”).
+
+## Modos de datos
+
+La app elige el adaptador al arrancar, en `src/lib/adapters/index.ts`:
+
+```ts
+const url = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
+const key = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
+export const cloudConfigured = Boolean(url && key)
+```
+
+Si **ambas** variables tienen valor → nube. Si falta alguna o están vacías → local.
+
+### Modo local (por defecto)
+
+- Datos en `localStorage`, clave `comidas:db:v1`.
+- Usuario fijo interno (`local@comidas.app`); no hay login.
+- Al primer arranque siembra los 20 platos de `src/data/seed.ts`.
+- Pensado para un solo dispositivo. Si se borran los datos del navegador, se pierde todo
+  (por eso existe exportar/importar en Ajustes).
+- Para volver desde modo nube: borrá `.env.local` o dejá las variables vacías, y reiniciá el server.
+
+### Modo nube (Supabase)
+
+1. Crear proyecto en Supabase.
+2. Ejecutar completo `supabase/schema.sql` en el **SQL Editor**. Es idempotente.
+3. Copiar `.env.example` a `.env.local` y completar:
+   ```bash
+   VITE_SUPABASE_URL=https://xxxxx.supabase.co
+   VITE_SUPABASE_ANON_KEY=eyJ...
+   ```
+4. Reiniciar `npm run dev`. La app muestra la pantalla de ingreso/registro.
+
+Detalles importantes:
+
+- La `anon key` es pública: la seguridad real está en las políticas RLS del schema.
+  **Nunca** pongas la `service_role` en el frontend.
+- Por defecto Supabase pide confirmar el email. Para probar rápido:
+  **Authentication → Sign In / Providers → Email → Confirm email: off**.
+- En producción, configurá **Authentication → URL Configuration** con la URL del deploy
+  (Site URL y Redirect URLs), si no el link de confirmación vuelve a localhost.
+- Las tablas (`dishes`, `plans`, `shopping_items`) usan `uuid`, `week_start` como `date`,
+  `day` 0–6 y RLS por `auth.uid() = user_id`.
+- El adaptador traduce camelCase (`freezerFriendly`, `dishId`) ↔ snake_case
+  (`freezer_friendly`, `dish_id`) en `src/lib/adapters/cloud.ts`.
+- Al cargar ejemplos o importar un backup, los ids que no son UUID se regeneran y se
+  remapean las referencias de planes/compras (necesario para las columnas `uuid`).
+- No hay cola offline ni sincronización en tiempo real: en nube, cada acción escribe
+  contra Supabase. Si falla la red, se muestra un toast y se recargan los datos.
+- `importAll` en nube **borra** los datos actuales antes de insertar el backup, sin
+  transacción. Si algo falla a mitad, puede quedar información incompleta.
+
+## Sistema de temas
+
+La app tiene tres temas: **clásico** (por defecto, cálido), **cool** (azul) y **oscuro**.
+Se eligen en **Ajustes → Apariencia** y se guardan solo en el dispositivo.
+
+### Cómo funciona
+
+- Los tokens viven en `src/index.css`. `@theme` define los valores del tema clásico.
+- Los temas alternativos se activan con un atributo en `<html>` y redeclaran las variables:
+
+  ```css
+  html[data-theme='cool'] { --color-brand: #2563eb; /* … */ }
+  html[data-theme='oscuro'] { color-scheme: dark; --color-brand: #5db98d; /* … */ }
+  ```
+
+- Las utilidades de Tailwind (`bg-cream`, `text-ink`, `bg-brand-soft`…) leen esas variables,
+  así que **no hace falta duplicar clases ni componentes** por tema.
+- `src/lib/theme.ts` expone `THEMES`, `readTheme()`, `applyTheme()` y `storeTheme()`.
+  La clave de `localStorage` es `comidas:theme` (`clasico | cool | oscuro`).
+- `index.html` tiene un script inline que aplica `data-theme` **antes** de cargar CSS/JS,
+  y `main.tsx` llama a `applyTheme(readTheme())` antes de montar React. Así no se ve el
+  destello del tema anterior al recargar.
+- `applyTheme()` también actualiza `<meta name="theme-color">` para la barra del navegador.
+
+### Tokens semánticos
+
+Además de los colores base (`cream`, `surface`, `ink`, `muted`, `line`, `brand`, `accent`),
+hay tokens pensados para no volver a escribir hex en los componentes:
+
+| Token | Uso |
+| --- | --- |
+| `on-brand` | Texto/ícono sobre `bg-brand` (botón primario, logo, check). |
+| `field` | Fondo de inputs y selects (puede diferir de `surface`). |
+| `favorite`, `favorite-soft`, `favorite-ink` | Estrella, chip de favorito y su texto. |
+| `danger-soft`, `danger-ink`, `danger-strong`, `danger-border` | Errores, borrar, zona peligrosa. |
+| `success-soft`, `success-ink`, `success-border` | Avisos y toasts de éxito. |
+
+Los colores de dificultad se movieron a variables `--mode-<id>` y `--mode-<id>-soft`; el tema
+oscuro define versiones más claras. `modeBorder()` en `src/lib/constants.ts` genera el borde
+translúcido con `color-mix`, porque los valores ahora son `var(...)` y no se les puede pegar
+un sufijo hex como `55`.
+
+### Reglas al escribir estilos
+
+- No uses `text-white`, `bg-white` ni hex sueltos en componentes: usá los tokens.
+- La opacidad va con la sintaxis de Tailwind (`bg-brand/40`) o `color-mix`; **nunca**
+  concatenes `color + '55'` si el color puede ser una variable CSS.
+- Si agregás un color nuevo, definilo en `@theme` **y** en los dos temas alternativos.
+- El tema oscuro ajusta también `color-scheme: dark` y los `--mode-*`.
+
+### Agregar un tema
+
+1. Sumar el id y los metadatos (nombre, descripción, `themeColor` y colores de la vista previa)
+   en `THEMES` (`src/lib/theme.ts`).
+2. Agregar el bloque `html[data-theme='nuevo']` en `src/index.css` redeclarando todos los
+   tokens: base, superficies, marca, acento, campo, favorito, peligro, éxito, sombras,
+   `--body-glow` y (si hace falta) `--mode-*`.
+3. Si el tema es oscuro, incluir `color-scheme: dark`.
+4. Probar cambio inmediato, recarga sin destello, `<meta name="theme-color">`, las cinco
+   pantallas y el contraste de textos.
+
+## Estructura del proyecto
+
+```text
+Comidas/
+├─ src/
+│  ├─ App.tsx                  # Gate de sesión + HashRouter + rutas
+│  ├─ main.tsx                 # Aplica el tema, monta React y registra la PWA
+│  ├─ index.css                # Tailwind v4, tokens (@theme) y temas cool/oscuro
+│  ├─ types.ts                 # Tipos de dominio y contrato DataAdapter
+│  ├─ state/AppContext.tsx     # Estado global y todas las acciones
+│  ├─ lib/
+│  │  ├─ adapters/index.ts     # Elige local o nube según env
+│  │  ├─ adapters/local.ts     # Persistencia en localStorage
+│  │  ├─ adapters/cloud.ts     # Supabase (auth + CRUD + import/export)
+│  │  ├─ suggest.ts            # Sugerencias y armado de lista de compras
+│  │  ├─ ingredients.ts        # Catálogo, normalización y búsqueda de ingredientes
+│  │  ├─ constants.ts          # Modos, colores, categorías, categorización
+│  │  ├─ date.ts               # Semanas (lunes), formatos en español
+│  │  ├─ theme.ts              # Temas: ids, persistencia y aplicación
+│  │  └─ useInstallPrompt.ts   # Hook de instalación PWA
+│  ├─ data/seed.ts             # 20 platos vegetarianos de ejemplo (ids UUID fijos)
+│  ├─ components/
+│  │  ├─ ui.tsx                # Button, Chip, Input, Sheet, EmptyState, Toaster…
+│  │  ├─ Shell.tsx             # Layout, nav inferior, ScreenHeader
+│  │  ├─ DayCard.tsx           # Tarjeta de un día
+│  │  ├─ ModeChips.tsx         # Chips de dificultad y etiqueta de modo
+│  │  ├─ DishPickerSheet.tsx   # Selector de plato del día
+│  │  ├─ DishEditor.tsx        # Alta/edición de receta
+│  │  ├─ IngredientNameInput.tsx # Autocompletado de ingredientes
+│  │  └─ DishDetail.tsx        # Receta en modo lectura
+│  └─ screens/
+│     ├─ WeekScreen.tsx        # Pantalla principal (semana)
+│     ├─ DishesScreen.tsx      # Recetario
+│     ├─ ShoppingScreen.tsx    # Lista de compras
+│     ├─ HistoryScreen.tsx     # Historial de semanas
+│     ├─ SettingsScreen.tsx    # Ajustes, cuenta, backup, PWA
+│     └─ AuthScreen.tsx        # Login/registro (solo modo nube)
+├─ index.html                  # Script que aplica el tema antes del primer render
+├─ supabase/schema.sql         # Tablas + RLS para modo nube
+├─ public/icons/               # Íconos PWA generados
+├─ docs/                       # Esta guía y estado del proyecto
+└─ vite.config.ts              # Manifest y service worker
+```
+
+## Rutas
+
+`HashRouter`: las URLs son `/#/`, `/#/platos`, etc. No hacen falta rewrites en el hosting.
+
+| Ruta | Pantalla |
+| --- | --- |
+| `#/` | Semana actual (o la que se esté navegando) |
+| `#/platos` | Recetario con búsqueda y filtros |
+| `#/compras` | Lista de compras de la semana visible |
+| `#/historial` | Semanas con actividad |
+| `#/ajustes` | Cuenta, backup, ejemplos, PWA, Supabase, borrar datos |
+| `*` | Redirige a `#/` |
+
+## Modelo de datos
+
+### Tipos de la app (`src/types.ts`)
+
+- `Difficulty`: `muy-facil | facil | media | elaborada`
+- `DayMode`: `Difficulty | freezer` (lo que se elige por día)
+- `Dish`: nombre, dificultad, minutos, tags, ingredientes, pasos, fuente, freezer, favorito.
+- `DayPlan`: `day` 0–6 (0 = lunes), `mode`, `dishId`, `note`.
+- `WeekPlan`: `weekStart` (ISO `yyyy-MM-dd`, lunes) + 7 días.
+- `ShoppingItem`: texto, tildado, rubro, `dishId` de origen.
+- `Snapshot`: backup versionado (`app: 'comidas'`, `version: 1`) con platos, planes y compras.
+
+### Convenciones de fechas
+
+- `weekStart` es siempre el **lunes** de la semana, en ISO local (`2026-11-09`).
+- `day` va de **0 (lunes) a 6 (domingo)**.
+- Se usa `date-fns` con locale `es`; evitar `new Date(string)` para fechas ISO
+  (usar `parseISO` o construir con `T12:00:00` para evitar corrimientos de zona).
+
+### Tablas de Supabase
+
+| Tabla | Filas | Notas |
+| --- | --- | --- |
+| `dishes` | Una por plato | `ingredients` es `jsonb`, `tags` es `text[]`. |
+| `plans` | Una por día/semana | `unique(user_id, week_start, day)`; upsert con ese conflicto. |
+| `shopping_items` | Una por ítem/semana | Se reemplaza la semana completa al guardar. |
+
+## Flujos clave
+
+### Semana y persistencia
+
+- `AppContext` carga **todos** los planes del usuario (`listPlans`) y deriva los 7 días
+  de `weekStart`. Cambiar de semana es solo estado local.
+- Las acciones son **optimistas**: actualizan el estado y luego escriben en el adaptador.
+  Si falla, muestran un toast y recargan todo (`reloadAll`).
+- Cambiar dificultad conserva el plato si sigue siendo válido; si no, lo quita
+  (`setDayMode` usa `matchesMode`). La tarjeta avisa cuando el plato se quitó.
+- `repeatWeek` copia los días con actividad de otra semana sobre la semana visible,
+  día por día. No borra los días que no estén en la semana origen.
+
+### Sugerencias
+
+En `src/lib/suggest.ts`:
+
+- `matchesMode(dish, mode, includeEasier = true)`:
+  - `freezer` exige `freezerFriendly`.
+  - El resto acepta platos de dificultad **igual o menor** (por defecto).
+- `pickSuggestion`:
+  - Excluye platos ya usados en la semana; si el pool queda vacío, reintenta sin exclusiones.
+  - Ponderación: favorito ×2.2, coincidencia exacta de dificultad ×1.6, freezer ×1.2.
+- `suggestWeek` completa solo días sin plato; los días sin dificultad asumen `facil`.
+- `shuffleDay` (botón de dados) usa la dificultad del día, o `facil` si no hay.
+
+### Autocompletado de ingredientes
+
+En `src/lib/ingredients.ts` + `src/components/IngredientNameInput.tsx`:
+
+- **Catálogo** (`buildIngredientCatalog(dishes)`): ingredientes del recetario (peso 10) +
+  `COMMON_INGREDIENTS` (~70 base, peso 1). Se ordena por uso y luego alfabéticamente.
+- **Normalización** (`normalizeIngredientName`): minúsculas, sin tildes, espacios colapsados.
+  Así “Queso”, “queso” y “ QUESO ” comparten la misma clave.
+- **Búsqueda** (`searchIngredients`): exacta → prefijo → palabra → substring → distancia de
+  edición (≤2 por palabra, solo desde 3 caracteres). “eso” y “qeso” encuentran “Queso”.
+- **Canonicalización** (`canonicalIngredientName`): al salir del campo (`blur`) y al guardar el
+  plato se reemplaza por el nombre canónico del catálogo; si no existe, se aplica
+  `formatIngredientName` (primera letra en mayúscula).
+- **UI:** input con `role="combobox"`, lista `role="listbox"`, navegación con ↑/↓, Enter para
+  elegir, Escape para cerrar. Al enfocar sin texto muestra los ingredientes más usados.
+- **Para ampliar la lista base:** agregar nombres a `COMMON_INGREDIENTS`. No hace falta tocar
+  la base de datos: el catálogo se arma en memoria a partir de los platos del usuario.
+- **Limitación:** no reescribe platos ya guardados; solo normaliza al crear o editar.
+
+### Lista de compras
+
+- Se genera **a pedido** (“Generar”/“Actualizar”) desde los platos de la semana.
+- Agrupa por `categoría | nombre | unidad` (todo en minúsculas).
+- Si todas las cantidades son numéricas, las suma; si no, las une con ` + `.
+- `mergeChecked` conserva los tildados por texto del ítem y por nombre de ingrediente
+  al regenerar.
+- `shoppingOutdated` marca la lista como desactualizada cuando hay un plato planificado
+  sin ítems asociados. Cambios internos de una receta no se detectan: hay que regenerar.
+- Los ítems manuales tienen `dishId: null` y sobreviven a la regeneración.
+- Hay un método `deleteShoppingItem` en los adaptadores que **todavía no se usa en la UI**.
+
+### Rubros de compras
+
+Los rubros son exactamente cuatro, en este orden:
+
+| Rubro | Qué agrupa | Color |
+| --- | --- | --- |
+| **Verdulería** | Frutas, verduras, hortalizas y aromáticas frescas. | Verde |
+| **Supermercado** | Lácteos, huevos, panadería, congelados, especias, almacén y envasados. | Azul |
+| **Dietética** | Legumbres, cereales integrales, frutos secos, semillas, avena, tofu, seitan, tahini. | Ámbar |
+| **Otros** | Lo que no coincide con ninguna palabra clave. | Gris |
+
+Todo está en `src/lib/constants.ts`:
+
+- `CATEGORIES`: los cuatro nombres. Es la única fuente de verdad para el `<select>` del editor,
+  el orden de los grupos y las claves de color.
+- `CATEGORY_COLORS`: color de cada rubro (se usa como punto en la lista).
+- `CATEGORY_KEYWORDS`: palabras clave por rubro. Se comparan contra el nombre en minúsculas.
+- `guessCategory(name)`: recorre **todos** los pares rubro/palabra y se queda con la
+  **coincidencia más larga**. Así lo específico gana sobre lo genérico:
+  - `tomate triturado` → Supermercado (gana “tomate triturado” sobre “tomate”).
+  - `arroz integral` → Dietética (gana “arroz integral” sobre “arroz”).
+  - `nuez moscada` → Supermercado (gana “nuez moscada” sobre “nuez”).
+  - `harina integral` → Dietética (gana “harina integral” sobre “harina”).
+  - Si no hay coincidencia → Otros.
+- `normalizeCategory(category, ingredientName)`: si la categoría no es una de las cuatro
+  (datos viejos como `Frutas`, `Almacén`, `Lácteos y huevos`, `Panadería`, `Especias`…),
+  la deduce del nombre del ingrediente; si no hay nombre, devuelve Otros. Se aplica en
+  `buildShoppingItems`, al ordenar/agrupar (`sortShopping`) y en el editor de platos.
+
+**Cómo agregar o ajustar palabras clave:** sumarlas al array del rubro en
+`CATEGORY_KEYWORDS`. No hace falta migrar datos ni tocar Supabase (`category` es texto libre).
+Si una palabra nueva choca con otra, recordá que gana la más larga, no la primera.
+
+### Historial
+
+- No hay tabla extra: el historial son las semanas con al menos un plan con `mode` o `dishId`.
+- Se ordena de más reciente a más antigua. “Ver semana” navega a esa semana y
+  “Copiar a esta semana” usa `repeatWeek`.
+- Vaciar una semana también elimina su lista de compras.
+
+### Autenticación (solo nube)
+
+- `AuthScreen` maneja ingreso y registro; si el registro requiere confirmación, muestra un aviso.
+- Los errores comunes de Supabase se traducen al español en `cloud.ts`.
+- No hay recuperación de contraseña ni cambio de email desde la app (ver pendientes).
+
+## Convenciones
+
+- **Idioma:** todo el texto visible en español rioplatense (voseo: “elegí”, “probá”).
+  Días y meses en minúscula dentro de oraciones.
+- **Estilos:** usar los tokens de `index.css` (`bg-cream`, `text-ink`, `text-brand`…).
+  Evitar colores sueltos: si un color no existe como token, agregalo en `@theme` y en los
+  temas alternativos (ver “Sistema de temas”).
+- **Componentes:** reutilizar `Button`, `Chip`, `Input`, `Sheet`, `EmptyState`, `ScreenHeader`.
+  Los modales usan `Sheet` (portal + `role="dialog"`).
+- **Estado:** no hay Redux/Zustand; todo pasa por `useApp()`.
+- **IDs:** `makeId()` (UUID) para datos nuevos. Los ejemplos usan UUID fijos válidos.
+- **Tipos:** agregar campos en `types.ts` y actualizar los dos adaptadores + schema.
+- **Accesibilidad:** botones con `aria-label` cuando son solo ícono; foco visible;
+  la app se probó a 390 px de ancho.
+
+## Recetas para extender
+
+### Agregar o cambiar platos de ejemplo
+
+Editar `src/data/seed.ts` (helper `dish(...)` e `ing(...)`). Los ids se generan como UUID
+fijos con `seedDishId`, así que mantener el patrón. Los ejemplos nuevos se cargan desde
+**Ajustes → Cargar platos de ejemplo** (evita duplicados por nombre).
+
+### Agregar una categoría de compras
+
+Hoy son cuatro rubros fijos y no se recomienda sumar más sin revisar la UI.
+
+1. Sumar el nombre en `CATEGORIES` (`src/lib/constants.ts`).
+2. Agregar color en `CATEGORY_COLORS`.
+3. Agregar palabras clave en `CATEGORY_KEYWORDS` para la autodetección.
+4. Revisar `normalizeCategory`: si la categoría nueva debe conservarse, ya la acepta por estar
+   en `CATEGORIES`.
+5. Actualizar la tabla de rubros de esta guía y el estado del proyecto.
+
+No hace falta tocar la base: `category` es texto libre.
+
+Para **ajustar** la autodetección alcanza con editar `CATEGORY_KEYWORDS`: gana la palabra más
+larga que coincida con el nombre del ingrediente. Los rubros viejos guardados se normalizan al
+mostrarse y al editar el plato.
+
+### Agregar una pantalla
+
+1. Crear el componente en `src/screens/`.
+2. Registrar la ruta en `src/App.tsx`.
+3. Si va en la navegación inferior, agregar el ítem en `TABS` (`src/components/Shell.tsx`).
+
+### Agregar un campo a `Dish`
+
+Checklist: `types.ts` → `DishEditor` (form) → `DishDetail` (lectura) → mapeos en
+`adapters/cloud.ts` (`DishRow`, `mapDish`, `toDishRow`) → `supabase/schema.sql`
+(columna + `alter table` si ya existe la tabla) → seed si aplica.
+
+### Cambiar las reglas de sugerencia
+
+Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, revisá también
+`DishPickerSheet` (usa `candidatesFor`) y `DayCard` (usa `matchesMode`).
+
+## Verificación manual
+
+No hay tests automatizados. Antes de publicar, probar en `npm run dev`:
+
+- [ ] La semana navega adelante/atrás y recuerda la dificultad y el plato tras recargar.
+- [ ] “Sorpréndeme” completa días vacíos sin repetir platos.
+- [ ] Subir dificultad conserva el plato; bajarla lo quita si ya no entra.
+- [ ] Elegir plato, ver receta, editarla y volver a la semana.
+- [ ] Crear un plato con ingredientes; aparece en el recetario y en sugerencias.
+- [ ] En el editor, escribir “eso” y elegir “Queso” del autocompletado; al salir del campo
+      “queso” debe quedar como “Queso” y guardarse así.
+- [ ] Generar compras, tildar ítems, recargar y verificar que siguen tildados.
+- [ ] La lista muestra solo los rubros Verdulería, Supermercado, Dietética y Otros (sin
+      encabezados viejos como Frutas, Almacén o Especias).
+- [ ] Agregar “Tomate triturado”, “Arroz integral” y “Nuez moscada” como ítems manuales:
+      deben caer en Supermercado, Dietética y Supermercado respectivamente.
+- [ ] En el editor de platos, el selector de rubro muestra las cuatro opciones y los platos
+      viejos aparecen con un rubro válido.
+- [ ] Agregar ítem manual y regenerar la lista.
+- [ ] Copiar una semana del historial y vaciar la semana actual.
+- [ ] Exportar JSON e importarlo (probar en local; en nube tener cuidado, reemplaza todo).
+- [ ] En Ajustes, cambiar entre Clásico, Cool y Oscuro; recargar y verificar que se mantiene
+      sin destello y que la barra del navegador toma el color del tema.
+- [ ] Con cada tema, recorrer las cinco pantallas y revisar contraste y desbordes.
+- [ ] `npm run build` y `npm run preview`: la PWA se instala y funciona offline.
+- [ ] Sin errores en la consola del navegador.
+
+Sugerencia para el futuro: agregar **Vitest** para `suggest.ts`/`date.ts` y **Playwright**
+para los flujos críticos. Los scripts temporales de capturas/auditoría usados durante el
+desarrollo se eliminaron a propósito.
+
+## Deploy y PWA
+
+- Es un sitio estático: build `npm run build`, publicar `dist/`.
+- Sirve en Vercel, Netlify, Cloudflare Pages, GitHub Pages o cualquier hosting estático.
+- Cargar `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` como variables de entorno del
+  proyecto **en tiempo de build** (Vite las inyecta al compilar).
+- Para instalar la PWA hace falta **HTTPS** (o `localhost`).
+- El service worker usa `registerType: 'autoUpdate'` y precachea JS/CSS/HTML/fuentes/íconos.
+  Tras un deploy, puede hacer falta recargar una vez para tomar la versión nueva.
+- En iOS no existe `beforeinstallprompt`: Ajustes muestra el instructivo de
+  “Compartir → Agregar a pantalla de inicio”.
+- El manifest usa `start_url: '/'` y `HashRouter`; no configures rewrites especiales.
+
+## Problemas comunes
+
+| Síntoma | Causa probable / solución |
+| --- | --- |
+| Aparece el login y no quería | Hay `.env.local` con credenciales; borralo o vacialo y reiniciá. |
+| “Email o contraseña incorrectos” | Credenciales mal, o el usuario no existe. |
+| “Confirmá tu email antes de ingresar” | Confirmación activa en Supabase; revisá el correo o desactivala para probar. |
+| Error de `uuid` al importar/cargar ejemplos | Ya se normalizan ids; si persiste, revisá que el schema tenga las columnas `uuid`. |
+| La PWA no se instala | Falta HTTPS o el manifest no cargó; probá `npm run build && npm run preview`. |
+| Cambios que no aparecen | Service worker con caché vieja: recargá o “Actualizar” en el navegador. |
+| El puerto 5173 está ocupado | Cerrá el proceso de Vite anterior o usá `--strictPort` para ver el error. |
+| Error `null value in column "note"` al guardar un día | Corregido: la app ahora manda `''`. Recargá con `Ctrl+Shift+R` para cargar el adaptador nuevo. |
+| Los ingredientes no se autocompletan | El catálogo se arma con tus platos + lista base; recargá la página para tomar la versión nueva. |
+| Se ve un destello del tema claro al recargar | Revisá que el script inline de `index.html` esté antes del CSS/JS y que `comidas:theme` sea válido. |
+| La lista de compras no refleja un cambio de receta | Regenerala; la app solo detecta platos nuevos, no cambios internos. |
