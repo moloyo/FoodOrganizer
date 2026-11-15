@@ -1,25 +1,30 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Check,
   ChevronRight,
   Cloud,
+  Copy,
   Download,
   Leaf,
+  Link2,
   LogOut,
   Moon,
+  Pencil,
   Smartphone,
   Sparkles,
   Sun,
   Trash2,
   Upload,
+  Users,
   Wand2,
   Waves,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../state/AppContext'
 import { ScreenHeader } from '../components/Shell'
-import { Button } from '../components/ui'
+import { Button, Input } from '../components/ui'
 import { MODES } from '../lib/constants'
+import { buildInviteLink } from '../lib/invite'
 import { readTheme, storeTheme, THEMES, type ThemeId } from '../lib/theme'
 import { useInstallPrompt } from '../lib/useInstallPrompt'
 import type { Snapshot } from '../types'
@@ -35,9 +40,25 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
+function formatInviteDate(value: string): string {
+  return new Date(value).toLocaleDateString('es-AR', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export function SettingsScreen() {
   const {
     user,
+    household,
+    householdMembers,
+    householdInvites,
+    refreshHousehold,
+    createInvite,
+    revokeInvite,
+    renameHousehold,
+    leaveHousehold,
     isCloud,
     cloudConfigured,
     signOut,
@@ -54,6 +75,18 @@ export function SettingsScreen() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [theme, setTheme] = useState<ThemeId>(() => readTheme())
+  const [editName, setEditName] = useState(household?.name ?? '')
+  const [newLink, setNewLink] = useState<string | null>(null)
+  const [newToken, setNewToken] = useState<string | null>(null)
+  const [householdBusy, setHouseholdBusy] = useState<string | null>(null)
+
+  useEffect(() => {
+    setEditName(household?.name ?? '')
+  }, [household?.id, household?.name])
+
+  const activeInvites = householdInvites.filter(
+    (invite) => !invite.revokedAt && new Date(invite.expiresAt) > new Date(),
+  )
 
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
 
@@ -132,6 +165,116 @@ export function SettingsScreen() {
     }
   }
 
+  async function handleRefreshHousehold() {
+    setHouseholdBusy('refresh')
+    try {
+      await refreshHousehold()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'No pudimos cargar tu hogar.', 'error')
+    } finally {
+      setHouseholdBusy(null)
+    }
+  }
+
+  async function handleRename() {
+    const name = editName.trim()
+    if (!name) {
+      toast('Poné un nombre para el hogar.', 'error')
+      return
+    }
+    if (name.length > 60) {
+      toast('El nombre puede tener hasta 60 caracteres.', 'error')
+      return
+    }
+    setHouseholdBusy('rename')
+    try {
+      await renameHousehold(name)
+      toast('Nombre actualizado.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'No pudimos renombrar el hogar.', 'error')
+    } finally {
+      setHouseholdBusy(null)
+    }
+  }
+
+  async function handleCreateInvite() {
+    setHouseholdBusy('create')
+    try {
+      const invite = await createInvite()
+      setNewToken(invite.token)
+      setNewLink(buildInviteLink(invite.token))
+      toast('Link de invitación creado.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'No pudimos crear el link.', 'error')
+    } finally {
+      setHouseholdBusy(null)
+    }
+  }
+
+  async function copyLink(link: string) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Portapapeles no disponible.')
+      await navigator.clipboard.writeText(link)
+      toast('Link copiado.', 'success')
+    } catch {
+      // Fallback para navegadores sin permiso sobre el portapapeles.
+      const area = document.createElement('textarea')
+      area.value = link
+      area.setAttribute('readonly', '')
+      area.style.position = 'fixed'
+      area.style.top = '-9999px'
+      document.body.appendChild(area)
+      area.select()
+      let copied = false
+      try {
+        copied = document.execCommand('copy')
+      } catch {
+        copied = false
+      }
+      document.body.removeChild(area)
+      toast(
+        copied ? 'Link copiado.' : 'No pudimos copiar el link.',
+        copied ? 'success' : 'error',
+      )
+    }
+  }
+
+  async function handleRevoke(token: string) {
+    setHouseholdBusy(`revoke:${token}`)
+    try {
+      await revokeInvite(token)
+      if (newToken === token) {
+        setNewLink(null)
+        setNewToken(null)
+      }
+      toast('Link revocado.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'No pudimos revocar el link.', 'error')
+    } finally {
+      setHouseholdBusy(null)
+    }
+  }
+
+  async function handleLeaveHousehold() {
+    if (
+      !window.confirm(
+        '¿Salir del hogar? Los datos compartidos quedan en el hogar y vas a pasar a un hogar nuevo vacío.',
+      )
+    ) {
+      return
+    }
+    setHouseholdBusy('leave')
+    try {
+      await leaveHousehold()
+      setNewLink(null)
+      setNewToken(null)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'No pudimos salir del hogar.', 'error')
+    } finally {
+      setHouseholdBusy(null)
+    }
+  }
+
   return (
     <div className="animate-rise">
       <ScreenHeader
@@ -156,6 +299,12 @@ export function SettingsScreen() {
               />
               {isCloud ? 'Cuenta en la nube' : 'Solo este dispositivo'}
             </p>
+            {household && (
+              <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted">
+                <Users className="size-3 shrink-0" />
+                <span className="truncate">{household.name}</span>
+              </p>
+            )}
           </div>
           {isCloud && (
             <Button size="icon" variant="ghost" onClick={() => void signOut()} aria-label="Cerrar sesión">
@@ -164,6 +313,197 @@ export function SettingsScreen() {
           )}
         </div>
       </div>
+
+      {isCloud && (
+        <Section title="Hogar">
+          {!household ? (
+            <div className="card p-4">
+              <p className="text-[12.5px] leading-snug text-muted">
+                Todavía no pudimos cargar tu hogar.
+              </p>
+              <Button
+                size="sm"
+                variant="soft"
+                className="mt-3"
+                onClick={() => void handleRefreshHousehold()}
+                disabled={householdBusy === 'refresh'}
+              >
+                {householdBusy === 'refresh' ? 'Cargando…' : 'Reintentar'}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="card p-4">
+                <div className="flex items-start gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
+                    <Users className="size-4.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13.5px] font-semibold text-ink">{household.name}</p>
+                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand-dark">
+                      <Users className="size-3" />
+                      {household.memberCount} miembro{household.memberCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Input
+                    value={editName}
+                    onChange={(event) => setEditName(event.target.value)}
+                    maxLength={60}
+                    placeholder="Nombre del hogar"
+                    aria-label="Nombre del hogar"
+                    className="h-9 text-[12.5px]"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="shrink-0"
+                    onClick={() => void handleRename()}
+                    disabled={householdBusy === 'rename'}
+                  >
+                    <Pencil className="size-3.5" />
+                    Guardar
+                  </Button>
+                </div>
+              </div>
+
+              <div className="card divide-y divide-line overflow-hidden">
+                {householdMembers.map((member) => (
+                  <div key={member.userId} className="flex items-center gap-3 px-4 py-3">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-cream text-[11px] font-semibold uppercase text-muted">
+                      {member.email?.[0] ?? '?'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
+                      {member.email}
+                      {user?.id === member.userId && (
+                        <span className="ml-1.5 text-[11px] font-normal text-muted">(vos)</span>
+                      )}
+                    </span>
+                    <span
+                      className={clsx(
+                        'shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold',
+                        member.role === 'owner'
+                          ? 'bg-brand-soft text-brand-dark'
+                          : 'bg-cream text-muted',
+                      )}
+                    >
+                      {member.role === 'owner' ? 'Dueño' : 'Miembro'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="card p-4">
+                <div className="flex items-center gap-2">
+                  <Link2 className="size-4 text-brand" />
+                  <p className="text-[13px] font-semibold text-ink">Invitaciones</p>
+                </div>
+
+                {newLink && (
+                  <div className="mt-3 rounded-xl bg-brand-soft/50 p-3">
+                    <p className="mb-1.5 text-[11px] font-semibold text-brand-dark">
+                      Nuevo link listo para compartir
+                    </p>
+                    <Input
+                      value={newLink}
+                      readOnly
+                      aria-label="Nuevo link de invitación"
+                      className="h-9 text-[11.5px]"
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void copyLink(newLink)}
+                      >
+                        <Copy className="size-3.5" />
+                        Copiar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => newToken && void handleRevoke(newToken)}
+                        disabled={!newToken || householdBusy === `revoke:${newToken}`}
+                      >
+                        <Trash2 className="size-3.5" />
+                        Revocar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <Button
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={() => void handleCreateInvite()}
+                  disabled={householdBusy === 'create'}
+                >
+                  <Link2 className="size-3.5" />
+                  {householdBusy === 'create' ? 'Creando…' : 'Crear link de invitación'}
+                </Button>
+
+                {activeInvites.length > 0 ? (
+                  <div className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line">
+                    {activeInvites.map((invite) => (
+                      <div key={invite.token} className="flex items-center gap-2 px-3 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-mono text-[11.5px] font-medium text-ink">
+                            {invite.token.slice(0, 8)}…
+                          </p>
+                          <p className="mt-0.5 text-[10.5px] leading-snug text-muted">
+                            Vence el {formatInviteDate(invite.expiresAt)} · usado{' '}
+                            {invite.usedCount} {invite.usedCount === 1 ? 'vez' : 'veces'}
+                          </p>
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Copiar link de invitación"
+                          onClick={() => void copyLink(buildInviteLink(invite.token))}
+                        >
+                          <Copy className="size-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Revocar link de invitación"
+                          onClick={() => void handleRevoke(invite.token)}
+                          disabled={householdBusy === `revoke:${invite.token}`}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-xl bg-cream px-3 py-2.5 text-[11.5px] leading-relaxed text-muted">
+                    No hay links activos.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-danger-border bg-danger-soft/60 p-4">
+                <p className="text-[13px] font-semibold text-danger-strong">Salir del hogar</p>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-danger-ink">
+                  Los datos compartidos quedan en el hogar y pasás a un hogar nuevo vacío.
+                </p>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  className="mt-3"
+                  onClick={() => void handleLeaveHousehold()}
+                  disabled={householdBusy === 'leave'}
+                >
+                  <LogOut className="size-3.5" />
+                  {householdBusy === 'leave' ? 'Saliendo…' : 'Salir del hogar'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
 
       <Section title="Apariencia">
         <div className="card p-3">

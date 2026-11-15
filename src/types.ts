@@ -65,6 +65,53 @@ export interface Snapshot {
 export interface SessionUser {
   id: string
   email: string
+  /** Hogar al que pertenece la sesión. Si falta, se usa el id de usuario (modo local). */
+  householdId?: string | null
+  householdName?: string | null
+}
+
+/** Un hogar comparte platos, semana, compras e historial entre todos sus miembros. */
+export interface Household {
+  id: string
+  name: string
+  role: 'owner' | 'member'
+  memberCount: number
+}
+
+export interface HouseholdMember {
+  userId: string
+  email: string
+  role: 'owner' | 'member'
+  joinedAt: string
+}
+
+export interface HouseholdInvite {
+  token: string
+  createdAt: string
+  expiresAt: string
+  revokedAt: string | null
+  usedCount: number
+}
+
+/** Datos públicos de una invitación (los ve quien todavía no es miembro). */
+export interface InviteInfo {
+  householdId: string
+  householdName: string
+  memberCount: number
+  expiresAt: string
+}
+
+/** Operaciones de hogar. El modo local las resuelve en memoria para los tests. */
+export interface HouseholdAdapter {
+  getHousehold(): Promise<Household | null>
+  renameHousehold(name: string): Promise<void>
+  listHouseholdMembers(): Promise<HouseholdMember[]>
+  createHouseholdInvite(): Promise<HouseholdInvite>
+  listHouseholdInvites(): Promise<HouseholdInvite[]>
+  revokeHouseholdInvite(token: string): Promise<void>
+  getHouseholdInviteInfo(token: string): Promise<InviteInfo | null>
+  joinHousehold(token: string): Promise<Household>
+  leaveHousehold(): Promise<void>
 }
 
 export type AdapterKind = 'local' | 'cloud'
@@ -85,9 +132,11 @@ export interface OfflineSupport {
   subscribe(cb: (status: OfflineStatus) => void): () => void
   /** Reintenta la cola si hay red. No hace nada si ya está sincronizando. */
   flush(): Promise<void>
+  /** Cambia el ámbito de caché/cola (al entrar o salir de un hogar). */
+  rescope?(scopeId: string | null): void
 }
 
-export interface DataAdapter {
+export interface DataAdapter extends HouseholdAdapter {
   kind: AdapterKind
   /** Solo en adaptadores con caché y cola offline. */
   offline?: OfflineSupport

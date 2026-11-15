@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react'
-import { Leaf } from 'lucide-react'
+import { Leaf, Users } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../state/AppContext'
 import { Logo } from '../components/Shell'
 import { Button, Input } from '../components/ui'
 
-export function AuthScreen() {
+export function AuthScreen({ invitePending = false }: { invitePending?: boolean }) {
   const { signIn, signUp, resetPassword } = useApp()
   const [mode, setMode] = useState<'in' | 'up' | 'forgot'>('in')
   const [email, setEmail] = useState('')
@@ -67,6 +67,19 @@ export function AuthScreen() {
             Las cenas de la semana, resueltas según el tiempo que tengas.
           </p>
         </div>
+
+        {invitePending && (
+          <div
+            role="status"
+            className="mt-5 flex items-start gap-2 rounded-xl border border-brand/25 bg-brand-soft/60 px-3 py-2.5 text-[11.5px] leading-snug text-ink"
+          >
+            <Users className="mt-0.5 size-4 shrink-0 text-brand" />
+            <span>
+              Tenés una invitación para compartir un hogar. Ingresá o creá tu cuenta y
+              después te preguntamos si querés unirte.
+            </span>
+          </div>
+        )}
 
         <div className="card mt-7 p-5">
           {mode === 'forgot' ? (

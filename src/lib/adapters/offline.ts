@@ -13,11 +13,13 @@ import { isUuid, newUuid } from '../uuid'
 /**
  * Adaptador que envuelve al de Supabase para que la app siga funcionando sin red:
  *
- * - **Caché de lectura** por usuario en `localStorage`: platos, planes y compras.
+ * - **Caché de lectura** por hogar en `localStorage`: platos, planes y compras.
  *   Si una lectura falla por falta de conexión, se devuelven los últimos datos guardados.
- * - **Cola de escrituras** por usuario: si una escritura falla por red, se guarda la
+ * - **Cola de escrituras** por hogar: si una escritura falla por red, se guarda la
  *   operación y se reintenta en orden al volver la conexión (o al abrir la app).
- * - Los datos de usuarios distintos nunca se mezclan: cada clave incluye el id de usuario.
+ * - El ámbito es `householdId` cuando la sesión pertenece a un hogar (así dos
+ *   miembros comparten la misma foto offline) y el `userId` como respaldo.
+ *   Los datos de hogares distintos nunca se mezclan.
  *
  * Solo se envuelve el adaptador de nube; el modo local ya persiste en `localStorage`.
  */
@@ -122,6 +124,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? 'Error desconocido')
 }
 
+/** El hogar es el ámbito natural; si falta (modo local), usamos el usuario. */
+function scopeFromUser(user: SessionUser | null): string | null {
+  return user?.householdId || user?.id || null
+}
+
 function noCacheError(): Error {
   return new Error('Sin conexión y no hay datos guardados todavía. Probá de nuevo cuando tengas red.')
 }
@@ -222,7 +229,7 @@ export function createOfflineAdapter(
   async function ensureUserId(): Promise<string | null> {
     if (userId) return userId
     const user = await base.getUser()
-    userId = user?.id ?? null
+    userId = scopeFromUser(user)
     return userId
   }
 
@@ -372,7 +379,8 @@ export function createOfflineAdapter(
     flushPromise = (async () => {
       patchStatus({ syncing: true, online: true })
       while (true) {
-        // Si el usuario cambió (logout / otra cuenta), no escribimos con la sesión nueva.
+        // Si el ámbito cambió (logout, otra cuenta u otro hogar), no escribimos
+        // la cola vieja con la sesión nueva.
         if (userId !== uid) break
         const current = readQueue(uid)
         const op = current[0]
@@ -455,11 +463,18 @@ export function createOfflineAdapter(
         }
       },
       flush,
+      rescope(scopeId) {
+        userId = scopeId
+        patchStatus({
+          pending: scopeId ? readQueue(scopeId).length : 0,
+          syncing: false,
+        })
+      },
     },
 
     async getUser(): Promise<SessionUser | null> {
       const user = await base.getUser()
-      userId = user?.id ?? null
+      userId = scopeFromUser(user)
       patchStatus({ pending: userId ? readQueue(userId).length : 0 })
       if (userId && isOnline()) void flush()
       return user
@@ -467,7 +482,7 @@ export function createOfflineAdapter(
 
     onAuthChange(cb) {
       return base.onAuthChange((user) => {
-        userId = user?.id ?? null
+        userId = scopeFromUser(user)
         patchStatus({ pending: userId ? readQueue(userId).length : 0 })
         cb(user)
         if (userId && isOnline()) void flush()
@@ -502,6 +517,32 @@ export function createOfflineAdapter(
       }
       userId = null
       patchStatus({ pending: 0, lastError: null })
+    },
+
+    /* --------------------------- Hogar (delegado) --------------------------- */
+
+    getHousehold: () => base.getHousehold(),
+    renameHousehold: (name) => base.renameHousehold(name),
+    listHouseholdMembers: () => base.listHouseholdMembers(),
+    createHouseholdInvite: () => base.createHouseholdInvite(),
+    listHouseholdInvites: () => base.listHouseholdInvites(),
+    revokeHouseholdInvite: (token) => base.revokeHouseholdInvite(token),
+    getHouseholdInviteInfo: (token) => base.getHouseholdInviteInfo(token),
+
+    async joinHousehold(token) {
+      const household = await base.joinHousehold(token)
+      // El hogar cambió: la caché/cola anterior ya no corresponde a esta sesión.
+      const user = await base.getUser()
+      userId = scopeFromUser(user)
+      patchStatus({ pending: userId ? readQueue(userId).length : 0, syncing: false })
+      return household
+    },
+
+    async leaveHousehold() {
+      await base.leaveHousehold()
+      const user = await base.getUser()
+      userId = scopeFromUser(user)
+      patchStatus({ pending: userId ? readQueue(userId).length : 0, syncing: false })
     },
 
     async listDishes() {

@@ -12,6 +12,10 @@ import type {
   DayMode,
   DayPlan,
   Dish,
+  Household,
+  HouseholdInvite,
+  HouseholdMember,
+  InviteInfo,
   OfflineStatus,
   PlanRow,
   SessionUser,
@@ -52,6 +56,17 @@ interface AppContextValue {
   /** Reintenta a mano la cola de cambios pendientes. */
   retrySync: () => void
   user: SessionUser | null
+  /** Hogar compartido al que pertenece la sesión. */
+  household: Household | null
+  householdMembers: HouseholdMember[]
+  householdInvites: HouseholdInvite[]
+  refreshHousehold: () => Promise<void>
+  createInvite: () => Promise<HouseholdInvite>
+  revokeInvite: (token: string) => Promise<void>
+  renameHousehold: (name: string) => Promise<void>
+  leaveHousehold: () => Promise<void>
+  joinHousehold: (token: string) => Promise<Household>
+  getInviteInfo: (token: string) => Promise<InviteInfo | null>
   isCloud: boolean
   cloudConfigured: boolean
   weekStart: string
@@ -106,6 +121,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [user, setUser] = useState<SessionUser | null>(null)
+  const [household, setHousehold] = useState<Household | null>(null)
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([])
+  const [householdInvites, setHouseholdInvites] = useState<HouseholdInvite[]>([])
   const [weekStart, setWeekStart] = useState(currentWeekStart)
   const [dishes, setDishes] = useState<Dish[]>([])
   const [allPlans, setAllPlans] = useState<PlanRow[]>([])
@@ -133,6 +151,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((item) => item.id !== id))
   }, [])
 
+  const refreshHousehold = useCallback(async () => {
+    const [nextHousehold, nextMembers, nextInvites] = await Promise.all([
+      adapter.getHousehold(),
+      adapter.listHouseholdMembers(),
+      adapter.listHouseholdInvites(),
+    ])
+    setHousehold(nextHousehold)
+    setHouseholdMembers(nextMembers)
+    setHouseholdInvites(nextInvites)
+  }, [adapter])
+
   /* ------------------------------- Sesión ------------------------------- */
 
   useEffect(() => {
@@ -144,8 +173,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUser(sessionUser)
         setReady(true)
       })
-      .catch(() => {
-        if (alive) setReady(true)
+      .catch((error: unknown) => {
+        if (alive) {
+          setReady(true)
+          toast(
+            error instanceof Error ? error.message : 'No pudimos iniciar tu sesión.',
+            'error',
+          )
+        }
       })
 
     const unsubscribe = adapter.onAuthChange((sessionUser) => {
@@ -158,7 +193,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       alive = false
       unsubscribe()
     }
-  }, [adapter])
+  }, [adapter, toast])
+
+  useEffect(() => {
+    if (!user) {
+      setHousehold(null)
+      setHouseholdMembers([])
+      setHouseholdInvites([])
+      return
+    }
+    void refreshHousehold().catch((error: unknown) => {
+      toast(
+        error instanceof Error ? error.message : 'No pudimos cargar tu hogar.',
+        'error',
+      )
+    })
+  }, [user?.id, user?.householdId, refreshHousehold, toast])
 
   /* --------------------------- Datos iniciales --------------------------- */
 
@@ -172,6 +222,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const weeks = [...new Set(nextPlans.filter((p) => p.mode || p.dishId).map((p) => p.weekStart))]
     setHistory(weeks.sort((a, b) => b.localeCompare(a)))
   }, [adapter])
+
+  /** Tras unirnos o salir de un hogar cambia el ámbito: recargamos todo. */
+  const refreshAfterMembershipChange = useCallback(async () => {
+    const nextUser = await adapter.getUser()
+    setUser(nextUser)
+    adapter.offline?.rescope?.(nextUser?.householdId ?? nextUser?.id ?? null)
+    await Promise.all([
+      reloadAll().catch(() => {}),
+      adapter
+        .listShopping(weekStart)
+        .then(setShopping)
+        .catch(() => {}),
+      refreshHousehold(),
+    ])
+  }, [adapter, reloadAll, refreshHousehold, weekStart])
+
+  const createInvite = useCallback(async () => {
+    const invite = await adapter.createHouseholdInvite()
+    await refreshHousehold()
+    return invite
+  }, [adapter, refreshHousehold])
+
+  const revokeInvite = useCallback(
+    async (token: string) => {
+      await adapter.revokeHouseholdInvite(token)
+      await refreshHousehold()
+    },
+    [adapter, refreshHousehold],
+  )
+
+  const renameHousehold = useCallback(
+    async (name: string) => {
+      await adapter.renameHousehold(name)
+      await refreshHousehold()
+    },
+    [adapter, refreshHousehold],
+  )
+
+  const joinHousehold = useCallback(
+    async (token: string) => {
+      const joined = await adapter.joinHousehold(token)
+      await refreshAfterMembershipChange()
+      toast(`Te uniste a ${joined.name}.`, 'success')
+      return joined
+    },
+    [adapter, refreshAfterMembershipChange, toast],
+  )
+
+  const leaveHousehold = useCallback(async () => {
+    await adapter.leaveHousehold()
+    await refreshAfterMembershipChange()
+    toast('Saliste del hogar. Tus datos compartidos quedan ahí.', 'success')
+  }, [adapter, refreshAfterMembershipChange, toast])
+
+  const getInviteInfo = useCallback(
+    (token: string) => adapter.getHouseholdInviteInfo(token),
+    [adapter],
+  )
 
   useEffect(() => {
     if (!user) {
@@ -198,7 +306,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false
     }
-  }, [user?.id, reloadAll, toast])
+  }, [user?.id, user?.householdId, reloadAll, toast])
 
   useEffect(() => {
     if (!user) return
@@ -214,7 +322,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false
     }
-  }, [user?.id, weekStart, adapter, toast])
+  }, [user?.id, user?.householdId, weekStart, adapter, toast])
 
   /* --------------------------- Offline / sincronización --------------------------- */
 
@@ -685,6 +793,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     offlineStatus,
     retrySync,
     user,
+    household,
+    householdMembers,
+    householdInvites,
+    refreshHousehold,
+    createInvite,
+    revokeInvite,
+    renameHousehold,
+    leaveHousehold,
+    joinHousehold,
+    getInviteInfo,
     isCloud: cloudConfigured,
     cloudConfigured,
     weekStart,

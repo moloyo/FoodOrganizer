@@ -1,6 +1,10 @@
 import type {
   DataAdapter,
   Dish,
+  Household,
+  HouseholdInvite,
+  HouseholdMember,
+  InviteInfo,
   PlanRow,
   SessionUser,
   ShoppingItem,
@@ -11,7 +15,12 @@ import { SEED_DISHES } from '../../data/seed'
 
 const DB_KEY = 'comidas:db:v1'
 
-const LOCAL_USER: SessionUser = { id: 'local', email: 'local@comidas.app' }
+const LOCAL_USER: SessionUser = {
+  id: 'local',
+  email: 'local@comidas.app',
+  householdId: 'hogar-local',
+  householdName: 'Hogar de prueba',
+}
 
 interface LocalDB {
   dishes: Dish[]
@@ -94,6 +103,58 @@ export function createLocalAdapter(): DataAdapter {
 
     async deleteAccount() {
       throw new Error('Estás en modo local. No hay cuenta que eliminar.')
+    },
+
+    /* --------- Hogar: stub en memoria (el modo local es solo para tests) --------- */
+
+    async getHousehold(): Promise<Household> {
+      return {
+        id: 'hogar-local',
+        name: 'Hogar de prueba',
+        role: 'owner',
+        memberCount: 1,
+      }
+    },
+
+    async renameHousehold() {
+      throw new Error('Los hogares solo existen en la nube.')
+    },
+
+    async listHouseholdMembers(): Promise<HouseholdMember[]> {
+      return [
+        {
+          userId: LOCAL_USER.id,
+          email: LOCAL_USER.email,
+          role: 'owner',
+          joinedAt: new Date().toISOString(),
+        },
+      ]
+    },
+
+    async createHouseholdInvite(): Promise<HouseholdInvite> {
+      throw new Error('Las invitaciones solo existen en la nube.')
+    },
+
+    async listHouseholdInvites(): Promise<HouseholdInvite[]> {
+      return []
+    },
+
+    async revokeHouseholdInvite() {
+      throw new Error('Las invitaciones solo existen en la nube.')
+    },
+
+    async getHouseholdInviteInfo(): Promise<InviteInfo | null> {
+      return null
+    },
+
+    async joinHousehold(): Promise<Household> {
+      const household = await this.getHousehold()
+      if (!household) throw new Error('No hay un hogar en modo local.')
+      return household
+    },
+
+    async leaveHousehold() {
+      throw new Error('Los hogares solo existen en la nube.')
     },
 
     async listDishes() {

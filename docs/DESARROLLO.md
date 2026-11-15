@@ -10,8 +10,10 @@
 3. Iniciá el servidor: `npm run dev` → <http://localhost:5173>.
 4. Sin `.env.local` la app muestra **“Falta configurar Supabase”**: no hay modo local para
    usuarios reales (solo para los tests de Playwright).
-5. Antes de cambiar código, confirmá que compila: `npm run build`.
-6. Leé [`ESTADO.md`](ESTADO.md) para saber qué está hecho y qué sigue.
+5. En el SQL Editor de Supabase corrieron `schema.sql` **y** `migration_hogares.sql` (en ese
+   orden); sin la migración la app no arranca.
+6. Antes de cambiar código, confirmá que compila: `npm run build`.
+7. Leé [`ESTADO.md`](ESTADO.md) para saber qué está hecho y qué sigue.
 
 > **Nota (Windows + npm 12):** en este entorno `npm run dev -- --port 5173` no siempre pasa el
 > puerto. Si pasa, usá `npx vite --port 5173 --strictPort`.
@@ -68,7 +70,9 @@ Playwright tenga un backend efímero y no pueda activarse en una build de produc
 ### Modo nube (Supabase)
 
 1. Crear proyecto en Supabase.
-2. Ejecutar completo `supabase/schema.sql` en el **SQL Editor**. Es idempotente.
+2. Ejecutar completo `supabase/schema.sql` y **después** `supabase/migration_hogares.sql`
+   en el **SQL Editor** (en ese orden; ambos son idempotentes). Si se vuelve a correr
+   `schema.sql`, hay que re-correr la migración: restaura las policies viejas.
 3. Copiar `.env.example` a `.env.local` y completar:
    ```bash
    VITE_SUPABASE_URL=https://xxxxx.supabase.co
@@ -84,11 +88,27 @@ Detalles importantes:
   **Authentication → Sign In / Providers → Email → Confirm email: off**.
 - En producción, configurá **Authentication → URL Configuration** con la URL del deploy
   (Site URL y Redirect URLs), si no el link de confirmación vuelve a localhost.
-- Las tablas (`dishes`, `plans`, `shopping_items`) usan `uuid`, `week_start` como `date`,
-  `day` 0–6 y RLS por `auth.uid() = user_id`.
-- `schema.sql` también define `public.delete_my_account()` (`security definer`, `set
-  search_path = public`), que borra la fila de `auth.users`; las tablas públicas se limpian por
-  `on delete cascade`. Solo la puede ejecutar `authenticated`.
+- **Todo pertenece a un hogar.** `dishes`, `plans` y `shopping_items` tienen
+  `household_id uuid not null`; las policies usan `public.is_household_member(household_id)`
+  en vez de `auth.uid() = user_id`. `week_start` sigue siendo `date` y `day` 0–6, y el
+  unique de `plans` pasa a `(household_id, week_start, day)`.
+- `user_id` queda como metadata de autoría: nullable y **sin FK** a `auth.users`, para que
+  borrar una cuenta no borre los datos compartidos por cascade.
+- El adaptador resuelve el hogar con `my_household()` (RPC `security definer`) al iniciar
+  sesión. Si no hay red, usa el último `householdId` guardado en
+  `comidas:household:v1:<userId>` para mantener la caché offline apuntando al hogar correcto.
+- **RPC de hogar** (todas `security definer`, solo `authenticated`): `my_household()`,
+  `household_members_list()`, `household_invite_create()`, `household_invite_list()`,
+  `household_invite_revoke()`, `household_invite_info()`, `household_join()`,
+  `household_leave()` y `household_rename()`. El helper `is_household_member(uuid)` también
+  tiene `execute` para `anon` porque lo usan las policies.
+- `household_join()` valida el token, mueve las filas del hogar origen al destino (borrando
+  antes los planes que chocarían con el unique), elimina la membership anterior, borra el hogar
+  origen si quedó vacío y agrega al usuario como `member`. `household_leave()` deja los datos
+  compartidos donde están y crea un hogar nuevo vacío.
+- `delete_my_account()` reemplaza al de `schema.sql`: saca al usuario de sus hogares, borra
+  los hogares que quedaron sin miembros (cascade limpia sus datos) y recién después borra
+  `auth.users`. Si el hogar tiene otros miembros, los datos sobreviven.
 - **Recuperación de contraseña:** en Supabase, agregá la URL del deploy (y `localhost:5173` para
   probar) en **Authentication → URL Configuration → Redirect URLs**. El link vuelve a la app con
   `type=recovery` en el hash; `recovery.ts` lo detecta y muestra la pantalla de contraseña nueva.
@@ -102,20 +122,23 @@ Detalles importantes:
 ### Modo offline (solo nube)
 
 `createOfflineAdapter` envuelve al adaptador de Supabase (`src/lib/adapters/offline.ts`) y agrega
-dos cosas, siempre **por usuario**:
+dos cosas, siempre **por hogar** (`scopeFromUser`: `householdId` si existe, si no el `userId`):
 
 - **Caché de lectura** en `localStorage`:
-  - `comidas:cache:v1:<userId>:dishes`
-  - `comidas:cache:v1:<userId>:plans`
-  - `comidas:cache:v1:<userId>:shopping` (un objeto `weekStart → items`)
+  - `comidas:cache:v1:<householdId>:dishes`
+  - `comidas:cache:v1:<householdId>:plans`
+  - `comidas:cache:v1:<householdId>:shopping` (un objeto `weekStart → items`)
 
   Si una lectura falla por red, se devuelven los últimos datos guardados. Si nunca se leyó esa
   semana, se lanza un error (“Sin conexión y no hay datos guardados…”) en vez de inventar una
   lista vacía.
-- **Cola de escrituras** en `comidas:queue:v1:<userId>`: solo se encolan errores de red
+- **Cola de escrituras** en `comidas:queue:v1:<householdId>`: solo se encolan errores de red
   (`isOfflineError`). Un error de RLS/validación se muestra y se descarta esa operación, porque
   reintentarla no lo arregla. Al volver `online` (o al abrir la app) se hace `flush()` en orden y
   se compactan escrituras repetidas del mismo día.
+- **Cambio de hogar:** `offline.rescope(scopeId)` (y los wrappers de `joinHousehold` /
+  `leaveHousehold`) actualizan el ámbito. `flush()` corta si el ámbito cambió, para no escribir
+  la cola de un hogar con la sesión de otro.
 - **Optimismo:** antes de escribir se actualiza la caché; así la UI ve el cambio aunque la
   operación quede pendiente.
 - **Compras:** `replaceShopping` solo se encola si esa semana ya estaba cacheada, para no pisar
@@ -128,6 +151,30 @@ dos cosas, siempre **por usuario**:
 La cola y la caché viven en el dispositivo: si se borran los datos del navegador antes de
 sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conflictos (gana la
 última escritura que llega) ni sincronización en tiempo real.
+
+### Hogares e invitaciones
+
+- Un usuario pertenece a **un solo hogar**; el hogar comparte platos, semana, compras e
+  historial. Todos los miembros pueden editar todo (no hay roles restrictivos en la UI).
+- **Alta diferida:** `my_household()` llama a `ensure_household()`, que crea “Mi hogar” con
+  membership `owner` la primera vez que alguien inicia sesión. La migración hace lo mismo con
+  las cuentas existentes y les asocia sus filas.
+- **Links:** `#/unirse/<uuid>`. `src/lib/invite.ts` captura el token al arrancar y lo guarda en
+  `sessionStorage` (`comidas:invite`), igual que `recovery.ts`, para que sobreviva al login.
+  `buildInviteLink()` arma la URL completa.
+- **Flujo:** `Gate` (`App.tsx`) muestra `InviteScreen` antes del tablero si hay un token
+  pendiente. Si no hay sesión, `AuthScreen` avisa que hay una invitación; después de entrar se
+  consulta `household_invite_info()` y se confirma con `household_join()`.
+- **Gestión:** **Ajustes → Hogar** (solo en nube) permite renombrar, ver miembros, crear/copiar/
+  revocar links y salir del hogar. `AppContext` expone `household`, `householdMembers`,
+  `householdInvites` y las acciones; al unirse o salir se recarga todo porque cambia el ámbito
+  de datos.
+- Los links vencen a los 7 días, son revocables y pueden usarse varias veces (`used_count` es
+  informativo). No hay límite de miembros.
+- **Ojo:** `household_join()` mueve *todos* los datos del hogar origen al destino. Para el caso
+  normal (cuenta nueva, hogar vacío) no hay nada que mover. Si alguien con datos abandona un
+  hogar compartido para unirse a otro, esos datos viajan con él; “Salir del hogar” en cambio los
+  deja donde están.
 
 ## Sistema de temas
 
@@ -207,6 +254,7 @@ Comidas/
 │  │  ├─ adapters/offline.ts   # Caché de lectura y cola de escrituras por usuario
 │  │  ├─ appMode.ts            # cloud | e2e-local | unconfigured
 │  │  ├─ uuid.ts               # isUuid / newUuid compartidos
+│  │  ├─ invite.ts             # Captura y armado de links de invitación
 │  │  ├─ suggest.ts            # Sugerencias y armado de lista de compras
 │  │  ├─ ingredients.ts        # Catálogo, normalización y búsqueda de ingredientes
 │  │  ├─ constants.ts          # Modos, colores, categorías, categorización
@@ -231,10 +279,12 @@ Comidas/
 │     ├─ HistoryScreen.tsx     # Historial de semanas
 │     ├─ SettingsScreen.tsx    # Ajustes, cuenta, backup, PWA
 │     ├─ AuthScreen.tsx        # Login/registro/recuperar (cuenta obligatoria)
-│     └─ ResetPasswordScreen.tsx # Contraseña nueva desde el link de recovery
+│     ├─ ResetPasswordScreen.tsx # Contraseña nueva desde el link de recovery
+│     └─ InviteScreen.tsx      # Confirmación para unirse a un hogar
 ├─ index.html                  # Script que aplica el tema antes del primer render
-├─ supabase/schema.sql         # Tablas + RLS + delete_my_account()
-├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline)
+├─ supabase/schema.sql         # Tablas base + RLS + delete_my_account()
+├─ supabase/migration_hogares.sql # Hogares, membresías, invitaciones y RLS por hogar
+├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite)
 ├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas)
 ├─ tests/e2e/env/.env          # Entorno de test (VITE_E2E_LOCAL=1) para forzar el modo local
 ├─ vitest.config.ts            # Configuración de Vitest
@@ -254,7 +304,8 @@ Comidas/
 | `#/platos` | Recetario con búsqueda y filtros |
 | `#/compras` | Lista de compras de la semana visible |
 | `#/historial` | Semanas con actividad |
-| `#/ajustes` | Cuenta, backup, ejemplos, PWA, Supabase, borrar datos |
+| `#/ajustes` | Cuenta, hogar, backup, ejemplos, PWA, borrar datos |
+| `#/unirse/<token>` | Invitación a un hogar (la atiende `Gate` antes del tablero) |
 | `*` | Redirige a `#/` |
 
 ## Modelo de datos
@@ -268,6 +319,9 @@ Comidas/
 - `WeekPlan`: `weekStart` (ISO `yyyy-MM-dd`, lunes) + 7 días.
 - `ShoppingItem`: texto, tildado, rubro, `dishId` de origen.
 - `Snapshot`: backup versionado (`app: 'comidas'`, `version: 1`) con platos, planes y compras.
+- `SessionUser`: `id`, `email`, `householdId`, `householdName`.
+- `Household`, `HouseholdMember`, `HouseholdInvite`, `InviteInfo`: contrato del hogar compartido.
+- `DataAdapter` extiende `HouseholdAdapter` (9 métodos de hogar/invitaciones).
 
 ### Convenciones de fechas
 
@@ -280,9 +334,16 @@ Comidas/
 
 | Tabla | Filas | Notas |
 | --- | --- | --- |
-| `dishes` | Una por plato | `ingredients` es `jsonb`, `tags` es `text[]`. |
-| `plans` | Una por día/semana | `unique(user_id, week_start, day)`; upsert con ese conflicto. |
-| `shopping_items` | Una por ítem/semana | Se reemplaza la semana completa al guardar. |
+| `households` | Una por hogar | `name`, `created_by` (sin FK, sobrevive al borrar cuenta). |
+| `household_members` | Una por usuario/hogar | PK `(household_id, user_id)` + índice único por `user_id`; `role` `owner`/`member`. Sin policies de escritura. |
+| `household_invites` | Una por link | `token uuid` PK, `expires_at` (7 días), `revoked_at`, `used_count`. |
+| `dishes` | Una por plato | `ingredients` es `jsonb`, `tags` es `text[]`, `household_id not null`. |
+| `plans` | Una por día/semana | `unique(household_id, week_start, day)`; upsert con ese conflicto. |
+| `shopping_items` | Una por ítem/semana | Se reemplaza la semana completa al guardar; `household_id not null`. |
+
+Las tres tablas de datos conservan `user_id` como metadata nullable y sin FK. El RLS usa
+`public.is_household_member(household_id)` (`security definer` para evitar recursión sobre
+`household_members`).
 
 ## Flujos clave
 
@@ -406,8 +467,15 @@ Si una palabra nueva choca con otra, recordá que gana la más larga, no la prim
 - `updatePassword(password)` usa `supabase.auth.updateUser`. Al guardar o “Volver al ingreso”
   se limpia la marca y se restaura `#/`.
 - **Eliminar cuenta:** `deleteAccount()` llama a `supabase.rpc('delete_my_account')`. La función
-  del schema borra la fila de `auth.users`; las tablas públicas caen por `on delete cascade`.
-  Si falta la función, el adaptador muestra un mensaje pidiendo ejecutar `schema.sql`.
+  de la migración saca al usuario de sus hogares, borra los hogares que quedaron vacíos (cascade
+  limpia sus datos) y recién después borra `auth.users`. Si el hogar tiene otros miembros, los
+  datos compartidos sobreviven. Si falta la función, el adaptador pide ejecutar la migración.
+- **Hogar:** `getUser()` / `my_household()` resuelven `householdId`. `onAuthChange` no hace RPC
+  dentro del callback de Supabase (está desaconsejado); usa el id guardado en
+  `localStorage` y el efecto de `AppContext` completa los datos del hogar.
+- **Invitaciones:** `invite.ts` guarda el token en `sessionStorage` (`comidas:invite`) al
+  arrancar. `Gate` muestra `InviteScreen`; `household_join()` cambia el hogar y
+  `refreshAfterMembershipChange()` recarga platos, planes y compras porque el ámbito cambió.
 - Los errores comunes de Supabase se traducen al español en `cloud.ts`.
 
 ## Convenciones
@@ -479,7 +547,8 @@ Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, rev
 | `tests/suggest.test.ts` | Dificultades, suma/conversión de unidades, tildados y manuales al regenerar. |
 | `tests/ingredients.test.ts` | Normalización, nombre canónico, catálogo y búsqueda tolerante a errores. |
 | `tests/appMode.test.ts` | Cuenta obligatoria: `cloud`, `unconfigured` y modo local solo con `--mode e2e` + `VITE_E2E_LOCAL=1`. |
-| `tests/offline.test.ts` | Errores de red, caché de lectura, cola por usuario, compactación, errores de RLS y ejemplos offline. |
+| `tests/offline.test.ts` | Errores de red, caché de lectura, cola por hogar (aislamiento y compartida), compactación, `rescope`, errores de RLS y ejemplos offline. |
+| `tests/invite.test.ts` | Parseo del token en el hash y armado del link de invitación. |
 
 Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
 necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
@@ -541,6 +610,14 @@ Antes de publicar, correr `npm test` y probar en `npm run dev`:
       cambiar algo (por ejemplo, una nota o un plato); sigue funcionando con la caché.
 - [ ] Volver a conectar: la cola se sincroniza sola o con “Reintentar”; el aviso desaparece y,
       tras recargar, los cambios están en Supabase.
+- [ ] Ajustes → Hogar: renombrar, ver miembros, crear un link, copiarlo y revocarlo.
+- [ ] Abrir el link en otro navegador/dispositivo, crear una cuenta y confirmar la unión; ambos
+      ven los mismos platos, semana y compras.
+- [ ] Un cambio hecho por un miembro aparece para el otro al recargar.
+- [ ] “Salir del hogar”: los datos compartidos siguen visibles para quien queda y quien salió
+      ve un hogar nuevo vacío.
+- [ ] Con dos cuentas, verificar por SQL que un `select` con el JWT de la segunda no ve filas
+      de un hogar ajeno (RLS por `is_household_member`).
 - [ ] `npm run build` y `npm run preview`: la PWA se instala y funciona offline.
 - [ ] Sin errores en la consola del navegador.
 
@@ -558,7 +635,11 @@ propósito.
   **Preview**.
 - Después del primer deploy, agregá la URL pública en Supabase
   (**Authentication → URL Configuration**: Site URL y Redirect URLs) para confirmación de email y
-  recuperación de contraseña.
+  recuperación de contraseña. Los links de invitación usan el mismo dominio (`#/unirse/<token>`),
+  así que no requieren una Redirect URL extra.
+- **Antes de desplegar el código de hogares**, ejecutá `supabase/migration_hogares.sql` en el
+  SQL Editor. El cliente nuevo y el schema nuevo tienen que ir juntos: si falta la migración,
+  `my_household()` no existe; si falta el cliente, las escrituras no envían `household_id`.
 - **Deploy actual:** <https://comidas-pi.vercel.app> (proyecto `comidas`, conectado a
   `moloyo/FoodOrganizer`). Para redesplegar: `npx vercel --prod`. Es la URL canónica: Site URL
   y Redirect URLs de Supabase ya apuntan acá (`comidas-pi.vercel.app/**`); el proyecto
@@ -583,7 +664,10 @@ propósito.
 | Cambios que no aparecen | Service worker con caché vieja: recargá o “Actualizar” en el navegador. |
 | El puerto 5173 está ocupado | Cerrá el proceso de Vite anterior o usá `--strictPort` para ver el error. |
 | Error `null value in column "note"` al guardar un día | Corregido: la app ahora manda `''`. Recargá con `Ctrl+Shift+R` para cargar el adaptador nuevo. |
-| “Falta actualizar el schema…” al eliminar la cuenta | Volvé a ejecutar `supabase/schema.sql`: define `delete_my_account()`. |
+| “Falta actualizar el schema…” al eliminar la cuenta o “Falta aplicar la migración de hogares…” | Ejecutá `supabase/schema.sql` y después `supabase/migration_hogares.sql` en el SQL Editor. |
+| `null value in column "household_id"` o `could not find the function my_household` | Corriste el cliente nuevo sin la migración (o al revés). Aplicá `migration_hogares.sql`. |
+| Dos usuarios no se ven los datos | Verificá que ambos estén en el mismo `household_id` (`select * from household_members`) y que el link no haya vencido. |
+| El link de invitación no abre la pantalla de unión | Revisá que el hash sea `#/unirse/<uuid>` y que `main.tsx` importe `captureInvite()` antes de montar React. |
 | El link de recuperación abre la app pero no la pantalla nueva | Verificá `type=recovery` en la URL y que `src/lib/recovery.ts` se importe antes que `App` en `main.tsx`. |
 | Los ingredientes no se autocompletan | El catálogo se arma con tus platos + lista base; recargá la página para tomar la versión nueva. |
 | Un ítem manual desapareció al regenerar | Debe tener `dishId: null`; si se importó desde un backup viejo, revisá el JSON. |

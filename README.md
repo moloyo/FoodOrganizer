@@ -24,6 +24,7 @@ Pensada mobile-first, en español, para cocina vegetariana.
 - **Historial**: guarda las semanas planificadas para consultarlas o repetirlas.
 - **Temas**: clásico, cool y oscuro, se eligen en Ajustes y se recuerdan en cada dispositivo.
 - **Cuenta obligatoria (nube)**: ingreso, registro, recuperación de contraseña y eliminación de cuenta. Sin sesión no se accede a los datos.
+- **Hogar compartido**: un link de invitación une a varias personas al mismo tablero; platos, semana, compras e historial son comunes y todos pueden editarlos.
 - **Offline (nube)**: con la app ya abierta, sin conexión se usan los últimos datos guardados y los cambios se encolan; al volver la red se sincronizan solos.
 - **PWA**: se instala en el celular, funciona sin conexión y se abre como app.
 
@@ -43,7 +44,9 @@ pantalla de “Falta configurar Supabase” en lugar de abrir un modo local.
 ### Configurar Supabase
 
 1. Creá un proyecto gratis en [supabase.com](https://supabase.com).
-2. Abrí **SQL Editor** y ejecutá completo [`supabase/schema.sql`](supabase/schema.sql).
+2. Abrí **SQL Editor** y ejecutá completo [`supabase/schema.sql`](supabase/schema.sql) y
+   después [`supabase/migration_hogares.sql`](supabase/migration_hogares.sql) (en ese orden).
+   La migración crea las tablas de hogares, migra los datos existentes y cambia el RLS.
 3. En **Project Settings → API**, copiá `Project URL` y `anon public key`.
 4. Creá `.env.local` a partir de `.env.example`:
 
@@ -89,11 +92,27 @@ configuradas; si cambiás de dominio, actualizalas en Authentication → URL Con
 
 | Tabla | Para qué |
 | --- | --- |
-| `dishes` | Recetario: dificultad, minutos, tags, ingredientes (`jsonb`), pasos, freezer. |
-| `plans` | Una fila por día: `week_start` (lunes), `day` 0–6, `mode`, `dish_id` y `note`. |
+| `households` | Un hogar compartido (nombre y dueño). |
+| `household_members` | Relación usuario ↔ hogar (`owner` / `member`). |
+| `household_invites` | Links de invitación con vencimiento, revocación y contador de usos. |
+| `dishes` | Recetario del hogar: dificultad, minutos, tags, ingredientes (`jsonb`), pasos, freezer. |
+| `plans` | Una fila por día y semana: `week_start` (lunes), `day` 0–6, `mode`, `dish_id` y `note`. |
 | `shopping_items` | Lista de compras por semana, con tildado y rubro. |
 
-Todas las tablas tienen RLS: cada usuario solo accede a sus filas (`auth.uid() = user_id`).
+Las tres tablas de datos tienen `household_id` y RLS por membresía: solo se ven las filas del
+hogar al que pertenece la sesión (`is_household_member(household_id)`). Las escrituras de
+membresías e invitaciones pasan por funciones `security definer` (`my_household()`,
+`household_join()`, `household_invite_create()`, etc.). El `user_id` que queda en las tablas de
+datos es solo metadata de autoría, sin FK.
+
+## Hogares
+
+En **Ajustes → Hogar** se ve el nombre, los miembros y los links de invitación activos.
+“Crear link de invitación” genera una URL `#/unirse/<token>` válida 7 días y revocable; quien la
+abre inicia sesión (o crea una cuenta) y confirma que quiere unirse. Al unirse, sus datos se
+mueven al hogar compartido y su hogar anterior vacío se elimina. “Salir del hogar” deja los datos
+compartidos donde están y crea un hogar nuevo vacío para esa persona. Si el último miembro se va
+o borra su cuenta, el hogar y sus datos se eliminan.
 
 ## Ideas para seguir
 
@@ -102,4 +121,4 @@ Todas las tablas tienen RLS: cada usuario solo accede a sus filas (`auth.uid() =
 - Cantidad de comensales y escalado de ingredientes.
 - "Ya lo cociné" para mejorar las sugerencias con el historial.
 - Recordatorio semanal para planificar el domingo.
-- Recetas compartidas entre cuentas.
+- Sincronización en tiempo real entre miembros del hogar (hoy se ve al recargar).

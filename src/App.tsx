@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppProvider, useApp } from './state/AppContext'
 import { appConfigured } from './lib/adapters'
@@ -10,8 +10,10 @@ import { ShoppingScreen } from './screens/ShoppingScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { AuthScreen } from './screens/AuthScreen'
+import { InviteScreen } from './screens/InviteScreen'
 import { ResetPasswordScreen } from './screens/ResetPasswordScreen'
 import { clearRecovery, recoveryPending } from './lib/recovery'
+import { captureInvite, clearPendingInvite, readPendingInvite } from './lib/invite'
 
 function Splash() {
   return (
@@ -58,10 +60,30 @@ function ConfigMissing() {
 function Gate() {
   const { ready, loaded, user, isCloud } = useApp()
   const [recovering, setRecovering] = useState(recoveryPending)
+  const [inviteToken, setInviteToken] = useState<string | null>(() => readPendingInvite())
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const token = captureInvite()
+      if (token) setInviteToken(token)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
   function finishRecovery() {
     clearRecovery()
     setRecovering(false)
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}#/`,
+    )
+  }
+
+  function finishInvite() {
+    clearPendingInvite()
+    setInviteToken(null)
     window.history.replaceState(
       null,
       '',
@@ -75,10 +97,16 @@ function Gate() {
     return <ResetPasswordScreen onDone={finishRecovery} onCancel={finishRecovery} />
   }
 
-  if (isCloud && !user) return <AuthScreen />
+  if (isCloud && !user) return <AuthScreen invitePending={Boolean(inviteToken)} />
 
   // Evita mostrar estados vacíos ("recetario vacío") mientras llegan los datos de la nube.
   if (!loaded) return <Splash />
+
+  // Un link de invitación se atiende antes de entrar al tablero: si la persona
+  // recién creó su cuenta, primero confirmamos a qué hogar se quiere unir.
+  if (isCloud && inviteToken) {
+    return <InviteScreen token={inviteToken} onDone={finishInvite} />
+  }
 
   return (
     <HashRouter>

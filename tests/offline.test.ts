@@ -70,6 +70,26 @@ function stubAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
     resetPassword: fail,
     updatePassword: fail,
     deleteAccount: async () => {},
+    getHousehold: async () => null,
+    renameHousehold: async () => {},
+    listHouseholdMembers: async () => [],
+    createHouseholdInvite: async () => ({
+      token: 'invite-1',
+      createdAt: '2026-11-15T00:00:00.000Z',
+      expiresAt: '2026-11-22T00:00:00.000Z',
+      revokedAt: null,
+      usedCount: 0,
+    }),
+    listHouseholdInvites: async () => [],
+    revokeHouseholdInvite: async () => {},
+    getHouseholdInviteInfo: async () => null,
+    joinHousehold: async () => ({
+      id: 'hogar-1',
+      name: 'Hogar',
+      role: 'member' as const,
+      memberCount: 2,
+    }),
+    leaveHousehold: async () => {},
     listDishes: fail,
     saveDish: fail,
     deleteDish: fail,
@@ -90,7 +110,11 @@ function stubAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
 function harness(overrides: Partial<DataAdapter> = {}) {
   const storage = new MemoryStorage()
   let online = true
-  let currentUser: SessionUser | null = { id: 'user-a', email: 'a@comidas.app' }
+  let currentUser: SessionUser | null = {
+    id: 'user-a',
+    email: 'a@comidas.app',
+    householdId: 'hogar-1',
+  }
   const base = stubAdapter({
     getUser: async () => currentUser,
     ...overrides,
@@ -209,7 +233,7 @@ describe('cola de escrituras', () => {
     expect(saved).toEqual([plan('d2', 'segunda')])
   })
 
-  it('separa la cola por usuario y no escribe con otra sesión', async () => {
+  it('separa la cola por hogar y no escribe con otra sesión', async () => {
     const saved: PlanRow[] = []
     const { adapter, setOnline, setUser } = harness({
       savePlan: async (row) => {
@@ -222,7 +246,8 @@ describe('cola de escrituras', () => {
     await adapter.savePlan(plan('d1', 'de A'))
     expect(adapter.offline?.getStatus().pending).toBe(1)
 
-    setUser({ id: 'user-b', email: 'b@comidas.app' })
+    // Otra persona de otro hogar no hereda los cambios pendientes.
+    setUser({ id: 'user-b', email: 'b@comidas.app', householdId: 'hogar-2' })
     await adapter.getUser()
     expect(adapter.offline?.getStatus().pending).toBe(0)
 
@@ -230,12 +255,52 @@ describe('cola de escrituras', () => {
     await adapter.offline?.flush()
     expect(saved).toHaveLength(0)
 
-    setUser({ id: 'user-a', email: 'a@comidas.app' })
+    setUser({ id: 'user-a', email: 'a@comidas.app', householdId: 'hogar-1' })
     await adapter.getUser()
     expect(adapter.offline?.getStatus().pending).toBe(1)
 
     await adapter.offline?.flush()
     expect(saved).toEqual([plan('d1', 'de A')])
+  })
+
+  it('comparte la cola entre dos miembros del mismo hogar', async () => {
+    const saved: PlanRow[] = []
+    const { adapter, setOnline, setUser } = harness({
+      savePlan: async (row) => {
+        saved.push(row)
+      },
+    })
+
+    await adapter.getUser()
+    setOnline(false)
+    await adapter.savePlan(plan('d1', 'escrito por A'))
+
+    // La pareja usa la misma caché/cola: ve el cambio pendiente y lo sincroniza.
+    setUser({ id: 'user-b', email: 'b@comidas.app', householdId: 'hogar-1' })
+    await adapter.getUser()
+    expect(adapter.offline?.getStatus().pending).toBe(1)
+
+    setOnline(true)
+    await adapter.offline?.flush()
+    expect(saved).toEqual([plan('d1', 'escrito por A')])
+    expect(adapter.offline?.getStatus().pending).toBe(0)
+  })
+
+  it('rescope cambia el ámbito de la cola al unirse a otro hogar', async () => {
+    const { adapter, setOnline } = harness({
+      savePlan: async () => {},
+    })
+
+    await adapter.getUser()
+    setOnline(false)
+    await adapter.savePlan(plan('d1', 'pendiente'))
+    expect(adapter.offline?.getStatus().pending).toBe(1)
+
+    adapter.offline?.rescope?.('hogar-2')
+    expect(adapter.offline?.getStatus().pending).toBe(0)
+
+    adapter.offline?.rescope?.('hogar-1')
+    expect(adapter.offline?.getStatus().pending).toBe(1)
   })
 
   it('no oculta errores que no son de red', async () => {

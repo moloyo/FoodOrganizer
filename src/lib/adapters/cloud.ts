@@ -3,7 +3,11 @@ import type {
   DataAdapter,
   Difficulty,
   Dish,
+  Household,
+  HouseholdInvite,
+  HouseholdMember,
   Ingredient,
+  InviteInfo,
   PlanRow,
   SessionUser,
   ShoppingItem,
@@ -11,10 +15,11 @@ import type {
   Snapshot,
 } from '../../types'
 import { isUuid, newUuid } from '../uuid'
+import { isOfflineError } from './offline'
 
 interface DishRow {
   id: string
-  user_id: string
+  household_id: string
   name: string
   difficulty: Difficulty
   minutes: number | null
@@ -28,7 +33,7 @@ interface DishRow {
 }
 
 interface PlanDbRow {
-  user_id: string
+  household_id: string
   week_start: string
   day: number
   mode: string | null
@@ -38,7 +43,7 @@ interface PlanDbRow {
 
 interface ShoppingDbRow {
   id: string
-  user_id: string
+  household_id: string
   week_start: string
   text: string
   checked: boolean
@@ -46,9 +51,101 @@ interface ShoppingDbRow {
   dish_id: string | null
 }
 
-function toUser(user: User | null | undefined): SessionUser | null {
+interface HouseholdRow {
+  id: string
+  name: string
+  role: 'owner' | 'member'
+  member_count: number | string
+}
+
+interface MemberRow {
+  user_id: string
+  email: string | null
+  role: 'owner' | 'member'
+  joined_at: string
+}
+
+interface InviteRow {
+  token: string
+  created_at: string
+  expires_at: string
+  revoked_at: string | null
+  used_count: number | string
+}
+
+interface InviteInfoRow {
+  household_id: string
+  household_name: string
+  member_count: number | string
+  expires_at: string
+}
+
+interface JoinRow {
+  household_id: string
+  name: string
+}
+
+function householdStorageKey(userId: string): string {
+  return `comidas:household:v1:${userId}`
+}
+
+function readCachedHouseholdId(userId: string): string | null {
+  try {
+    return typeof localStorage === 'undefined'
+      ? null
+      : localStorage.getItem(householdStorageKey(userId))
+  } catch {
+    return null
+  }
+}
+
+function writeCachedHouseholdId(userId: string, householdId: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(householdStorageKey(userId), householdId)
+    }
+  } catch {
+    // sin storage disponible: la resolución por RPC sigue funcionando
+  }
+}
+
+function toUser(
+  user: User | null | undefined,
+  householdId?: string | null,
+  householdName?: string | null,
+): SessionUser | null {
   if (!user) return null
-  return { id: user.id, email: user.email ?? '' }
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    householdId: householdId ?? null,
+    householdName: householdName ?? null,
+  }
+}
+
+/** Las RPC que devuelven `table` llegan como array; las escalares, como valor. */
+function firstRow<T>(data: unknown): T | null {
+  if (Array.isArray(data)) return (data[0] as T) ?? null
+  return (data as T) ?? null
+}
+
+function rpcRows<T>(data: unknown): T[] {
+  return Array.isArray(data) ? (data as T[]) : data ? [data as T] : []
+}
+
+function migrationHint(error: { message?: string; code?: string }): Error {
+  const message = error.message ?? 'Error desconocido'
+  if (
+    error.code === 'PGRST202' ||
+    /function .* does not exist/i.test(message) ||
+    /could not find the function/i.test(message) ||
+    /schema cache/i.test(message)
+  ) {
+    return new Error(
+      'Falta aplicar la migración de hogares: ejecutá supabase/migration_hogares.sql en el SQL Editor de Supabase.',
+    )
+  }
+  return new Error(message)
 }
 
 function mapDish(row: DishRow): Dish {
@@ -67,10 +164,10 @@ function mapDish(row: DishRow): Dish {
   }
 }
 
-function toDishRow(dish: Dish, userId: string): DishRow {
+function toDishRow(dish: Dish, householdId: string): DishRow {
   return {
     id: dish.id,
-    user_id: userId,
+    household_id: householdId,
     name: dish.name,
     difficulty: dish.difficulty,
     minutes: dish.minutes,
@@ -109,49 +206,124 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   })
 
-  let cachedUserId: string | null = null
+  /** Sesión ya resuelta con su hogar; se invalida al entrar/salir de uno. */
+  let cachedSession: { userId: string; user: SessionUser } | null = null
 
-  async function requireUserId(): Promise<string> {
-    if (cachedUserId) return cachedUserId
+  function invalidateSession(): void {
+    cachedSession = null
+  }
+
+  async function resolveSession(): Promise<SessionUser | null> {
     const { data } = await client.auth.getSession()
-    const user = toUser(data.session?.user)
+    const authUser = data.session?.user
+    if (!authUser) {
+      cachedSession = null
+      return null
+    }
+    if (cachedSession?.userId === authUser.id) return cachedSession.user
+
+    // Si no hay red, usamos el último hogar conocido para que la caché offline
+    // siga apuntando a los datos correctos.
+    let householdId = readCachedHouseholdId(authUser.id)
+    let householdName: string | null = null
+    try {
+      const { data: rpcData, error } = await client.rpc('my_household')
+      if (error) throw error
+      const row = firstRow<HouseholdRow>(rpcData)
+      if (!row) throw new Error('No se pudo resolver el hogar de la cuenta.')
+      householdId = row.id
+      householdName = row.name
+      writeCachedHouseholdId(authUser.id, row.id)
+    } catch (error) {
+      const online = typeof navigator === 'undefined' || navigator.onLine !== false
+      if (householdId && isOfflineError(error, online)) {
+        // sin conexión: seguimos con el hogar guardado en este dispositivo
+      } else {
+        throw migrationHint(error as { message?: string; code?: string })
+      }
+    }
+
+    const user = toUser(authUser, householdId, householdName)
+    if (!user) return null
+    cachedSession = { userId: authUser.id, user }
+    return user
+  }
+
+  async function requireHouseholdId(): Promise<string> {
+    const user = await resolveSession()
     if (!user) throw new Error('Tu sesión expiró. Volvé a ingresar.')
-    cachedUserId = user.id
-    return user.id
+    if (!user.householdId) {
+      throw new Error('No pudimos cargar tu hogar. Conectate a internet y volvé a intentar.')
+    }
+    return user.householdId
+  }
+
+  async function rpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+    const { data, error } = await client.rpc(name, args)
+    if (error) throw migrationHint(error)
+    return data as T
+  }
+
+  async function refreshAfterMembershipChange(): Promise<Household> {
+    invalidateSession()
+    const user = await resolveSession()
+    if (user?.householdId) writeCachedHouseholdId(user.id, user.householdId)
+    const household = await getHousehold()
+    if (!household) throw new Error('No se pudo cargar el hogar después del cambio.')
+    return household
+  }
+
+  async function getHousehold(): Promise<Household | null> {
+    const data = await rpc<unknown>('my_household')
+    const row = firstRow<HouseholdRow>(data)
+    if (!row) return null
+    return {
+      id: row.id,
+      name: row.name,
+      role: row.role,
+      memberCount: Number(row.member_count ?? 0),
+    }
   }
 
   return {
     kind: 'cloud',
 
     async getUser() {
-      const { data } = await client.auth.getSession()
-      const user = toUser(data.session?.user)
-      cachedUserId = user?.id ?? null
-      return user
+      return resolveSession()
     },
 
     onAuthChange(cb) {
       const { data } = client.auth.onAuthStateChange((_event, session) => {
-        const user = toUser(session?.user)
-        cachedUserId = user?.id ?? null
-        cb(user)
+        if (!session?.user) {
+          invalidateSession()
+          cb(null)
+          return
+        }
+        // No hacemos RPC dentro del callback de auth: Supabase desaconseja
+        // await allí. El hogar completo se resuelve con getUser() al cargar.
+        invalidateSession()
+        cb(toUser(session.user, readCachedHouseholdId(session.user.id)))
       })
       return () => data.subscription.unsubscribe()
     },
 
     async signIn(email, password) {
+      invalidateSession()
       const { error } = await client.auth.signInWithPassword({ email, password })
       if (error) throw new Error(traducirAuthError(error.message))
+      await resolveSession()
     },
 
     async signUp(email, password) {
+      invalidateSession()
       const { data, error } = await client.auth.signUp({ email, password })
       if (error) throw new Error(traducirAuthError(error.message))
+      if (data.session) await resolveSession()
       return { needsConfirmation: !data.session }
     },
 
     async signOut() {
-      cachedUserId = null
+      invalidateSession()
       const { error } = await client.auth.signOut()
       if (error) throw new Error(error.message)
     },
@@ -179,14 +351,87 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
           /function .* does not exist/i.test(error.message)
         ) {
           throw new Error(
-            'Falta actualizar el schema de Supabase: ejecutá supabase/schema.sql para habilitar el borrado de cuenta.',
+            'Falta actualizar el schema de Supabase: ejecutá supabase/migration_hogares.sql para habilitar el borrado de cuenta.',
           )
         }
         throw new Error(error.message)
       }
-      cachedUserId = null
+      invalidateSession()
       await client.auth.signOut().catch(() => {})
     },
+
+    /* ----------------------------- Hogar ----------------------------- */
+
+    getHousehold,
+
+    async renameHousehold(name) {
+      await rpc('household_rename', { p_name: name.trim() })
+    },
+
+    async listHouseholdMembers() {
+      const data = await rpc<unknown>('household_members_list')
+      return rpcRows<MemberRow>(data).map((row) => ({
+        userId: row.user_id,
+        email: row.email ?? '',
+        role: row.role,
+        joinedAt: row.joined_at,
+      }))
+    },
+
+    async createHouseholdInvite() {
+      const token = await rpc<string>('household_invite_create')
+      const invites = await this.listHouseholdInvites()
+      return (
+        invites.find((invite) => invite.token === token) ?? {
+          token,
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          revokedAt: null,
+          usedCount: 0,
+        }
+      )
+    },
+
+    async listHouseholdInvites() {
+      const data = await rpc<unknown>('household_invite_list')
+      return rpcRows<InviteRow>(data).map((row) => ({
+        token: row.token,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at ?? null,
+        usedCount: Number(row.used_count ?? 0),
+      }))
+    },
+
+    async revokeHouseholdInvite(token) {
+      await rpc('household_invite_revoke', { p_token: token })
+    },
+
+    async getHouseholdInviteInfo(token) {
+      const data = await rpc<unknown>('household_invite_info', { p_token: token })
+      const row = firstRow<InviteInfoRow>(data)
+      if (!row) return null
+      return {
+        householdId: row.household_id,
+        householdName: row.household_name,
+        memberCount: Number(row.member_count ?? 0),
+        expiresAt: row.expires_at,
+      }
+    },
+
+    async joinHousehold(token) {
+      const data = await rpc<unknown>('household_join', { p_token: token })
+      const row = firstRow<JoinRow>(data)
+      if (!row) throw new Error('La invitación no es válida o ya venció.')
+      return refreshAfterMembershipChange()
+    },
+
+    async leaveHousehold() {
+      await rpc('household_leave')
+      await refreshAfterMembershipChange()
+    },
+
+    /* ----------------------------- Datos ----------------------------- */
 
     async listDishes() {
       const { data, error } = await client
@@ -198,10 +443,10 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async saveDish(dish) {
-      const userId = await requireUserId()
+      const householdId = await requireHouseholdId()
       const { error } = await client
         .from('dishes')
-        .upsert(toDishRow(dish, userId), { onConflict: 'id' })
+        .upsert(toDishRow(dish, householdId), { onConflict: 'id' })
       if (error) throw new Error(error.message)
       return dish
     },
@@ -212,9 +457,9 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async seedDishes(dishes) {
-      const userId = await requireUserId()
+      const householdId = await requireHouseholdId()
       const rows = dishes.map((dish) =>
-        toDishRow({ ...dish, id: isUuid(dish.id) ? dish.id : newUuid() }, userId),
+        toDishRow({ ...dish, id: isUuid(dish.id) ? dish.id : newUuid() }, householdId),
       )
       const { data, error } = await client.from('dishes').insert(rows).select('*')
       if (error) throw new Error(error.message)
@@ -228,9 +473,9 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async savePlan(row) {
-      const userId = await requireUserId()
+      const householdId = await requireHouseholdId()
       const payload: PlanDbRow = {
-        user_id: userId,
+        household_id: householdId,
         week_start: row.weekStart,
         day: row.day,
         mode: row.mode,
@@ -239,22 +484,22 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       }
       const { error } = await client
         .from('plans')
-        .upsert(payload, { onConflict: 'user_id,week_start,day' })
+        .upsert(payload, { onConflict: 'household_id,week_start,day' })
       if (error) throw new Error(error.message)
     },
 
     async clearWeek(weekStart) {
-      const userId = await requireUserId()
+      const householdId = await requireHouseholdId()
       const { error } = await client
         .from('plans')
         .delete()
-        .eq('user_id', userId)
+        .eq('household_id', householdId)
         .eq('week_start', weekStart)
       if (error) throw new Error(error.message)
       const shopping = await client
         .from('shopping_items')
         .delete()
-        .eq('user_id', userId)
+        .eq('household_id', householdId)
         .eq('week_start', weekStart)
       if (shopping.error) throw new Error(shopping.error.message)
     },
@@ -270,17 +515,17 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async replaceShopping(weekStart, items) {
-      const userId = await requireUserId()
+      const householdId = await requireHouseholdId()
       const removal = await client
         .from('shopping_items')
         .delete()
-        .eq('user_id', userId)
+        .eq('household_id', householdId)
         .eq('week_start', weekStart)
       if (removal.error) throw new Error(removal.error.message)
       if (items.length === 0) return
       const rows = items.map((item) => ({
         id: item.id,
-        user_id: userId,
+        household_id: householdId,
         week_start: weekStart,
         text: item.text,
         checked: item.checked,
@@ -297,7 +542,6 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async exportAll(): Promise<Snapshot> {
-      const userId = await requireUserId()
       const [dishesRes, plansRes, shoppingRes] = await Promise.all([
         client.from('dishes').select('*'),
         client.from('plans').select('*'),
@@ -318,7 +562,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async importAll(snapshot) {
-      const userId = await requireUserId()
+      const householdId = await requireHouseholdId()
 
       // Normalizamos ids para que funcionen con las columnas uuid de Supabase.
       // También remapeamos las referencias de planes y compras a los platos.
@@ -326,7 +570,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       const dishes = snapshot.dishes.map((dish) => {
         const id = isUuid(dish.id) ? dish.id : newUuid()
         idMap.set(dish.id, id)
-        return toDishRow({ ...dish, id }, userId)
+        return toDishRow({ ...dish, id }, householdId)
       })
       const knownDishIds = new Set(dishes.map((dish) => dish.id))
       const mapDishId = (id: string | null): string | null => {
@@ -335,9 +579,9 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
         return knownDishIds.has(mapped) ? mapped : null
       }
 
-      await client.from('plans').delete().eq('user_id', userId)
-      await client.from('shopping_items').delete().eq('user_id', userId)
-      await client.from('dishes').delete().eq('user_id', userId)
+      await client.from('plans').delete().eq('household_id', householdId)
+      await client.from('shopping_items').delete().eq('household_id', householdId)
+      await client.from('dishes').delete().eq('household_id', householdId)
 
       if (dishes.length > 0) {
         const { error } = await client.from('dishes').insert(dishes)
@@ -345,7 +589,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       }
       if (snapshot.plans.length > 0) {
         const rows: PlanDbRow[] = snapshot.plans.map((plan) => ({
-          user_id: userId,
+          household_id: householdId,
           week_start: plan.weekStart,
           day: plan.day,
           mode: plan.mode,
@@ -358,7 +602,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       if (snapshot.shopping.length > 0) {
         const rows = snapshot.shopping.map((item) => ({
           id: isUuid(item.id) ? item.id : newUuid(),
-          user_id: userId,
+          household_id: householdId,
           week_start: item.weekStart,
           text: item.text,
           checked: item.checked,
@@ -371,10 +615,10 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async wipe() {
-      const userId = await requireUserId()
-      await client.from('plans').delete().eq('user_id', userId)
-      await client.from('shopping_items').delete().eq('user_id', userId)
-      const { error } = await client.from('dishes').delete().eq('user_id', userId)
+      const householdId = await requireHouseholdId()
+      await client.from('plans').delete().eq('household_id', householdId)
+      await client.from('shopping_items').delete().eq('household_id', householdId)
+      const { error } = await client.from('dishes').delete().eq('household_id', householdId)
       if (error) throw new Error(error.message)
     },
   }

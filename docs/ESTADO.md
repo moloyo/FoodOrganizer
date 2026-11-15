@@ -12,13 +12,18 @@ recetario, generar la lista de compras, consultar el historial y funcionar como 
 **Todos los usuarios necesitan una cuenta**: la app pide login siempre y los datos se
 sincronizan en la nube. Sin credenciales de Supabase muestra una pantalla de configuración; el
 modo local quedó **solo para los tests de Playwright**. Además, en nube hay **caché de lectura y
-cola de escrituras** por usuario: sin conexión se ven los últimos datos y los cambios se
+cola de escrituras** por hogar: sin conexión se ven los últimos datos y los cambios se
 reintentan al volver la red.
 
 El deploy está publicado en Vercel (**<https://comidas-pi.vercel.app>**) con las variables de
 Supabase cargadas: la URL pública muestra el login y exige cuenta. Las **Redirect URLs de
 Supabase ya están configuradas** (Site URL y allowlist) y el usuario verificó el flujo de
 recuperación de contraseña y el login desde la URL pública.
+
+**En curso: hogares compartidos.** El código del cliente ya está listo (tablero compartido,
+links de invitación, UI en Ajustes) y la migración SQL está escrita, pero **todavía no se
+aplicó en Supabase ni se desplegó**: hay una ventana breve en la que schema y cliente deben
+actualizarse juntos. Falta verificarlo con dos cuentas reales.
 
 ## Qué está hecho
 
@@ -81,23 +86,40 @@ recuperación de contraseña y el login desde la URL pública.
 - Pasos para conectar Supabase.
 - Leyenda de dificultades y borrado total de datos.
 
+### Hogar compartido (implementado, pendiente de aplicar en Supabase)
+
+- **Un hogar por usuario**, que comparte platos, semana, compras e historial. Todos los
+  miembros pueden editar todo.
+- **Ajustes → Hogar**: nombre editable, lista de miembros con email y rol, alta/copia/
+  revocación de links de invitación y “Salir del hogar”.
+- **Links de invitación** `#/unirse/<uuid>`: vencen a los 7 días, son revocables y reutilizables.
+  Quien los abre inicia sesión o crea una cuenta y confirma la unión en `InviteScreen`.
+- **Migración de datos**: `supabase/migration_hogares.sql` crea `households`,
+  `household_members` y `household_invites`, agrega `household_id` a las tres tablas, migra las
+  filas existentes sin perder nada y cambia el RLS a `is_household_member(household_id)`.
+- **Borrado de cuenta**: si el hogar tiene otros miembros, los datos compartidos sobreviven;
+  si era el último, el hogar y sus datos se eliminan.
+
 ### Base técnica
 
 - Adaptador de datos abstracto con implementación de nube (Supabase) envuelta por un adaptador
   offline; el local (`localStorage`) queda solo para los tests de Playwright.
-- **Caché de lectura por usuario** en `localStorage` (`comidas:cache:v1:<userId>:dishes|plans|shopping`):
-  si una lectura falla por red, se muestran los últimos datos guardados.
-- **Cola de escrituras por usuario** (`comidas:queue:v1:<userId>`): las escrituras que fallan
+- **Caché de lectura por hogar** en `localStorage` (`comidas:cache:v1:<householdId>:dishes|plans|shopping`):
+  si una lectura falla por red, se muestran los últimos datos guardados. Dos miembros del mismo
+  hogar comparten ámbito; hogares distintos quedan aislados (`rescope` al unirse/salir).
+- **Cola de escrituras por hogar** (`comidas:queue:v1:<householdId>`): las escrituras que fallan
   por red se guardan y se reintentan al volver la conexión o al abrir la app. La UI muestra
   “Sin conexión” y la cantidad de cambios pendientes, con un botón “Reintentar”.
 - Los errores que no son de red (RLS, validación) no se encolan: se muestran y se descarta solo
   esa operación.
 - **Cuenta obligatoria:** sin variables de Supabase la app muestra “Falta configurar Supabase”;
   `VITE_E2E_LOCAL=1` solo tiene efecto junto con `--mode e2e`.
-- `supabase/schema.sql` con tablas, índices, RLS y la función `delete_my_account()`.
+- `supabase/schema.sql` (base) + `supabase/migration_hogares.sql` (hogares, RLS por membresía y
+  `delete_my_account()` adaptado). El cliente resuelve el hogar con `my_household()` y guarda un
+  fallback en `comidas:household:v1:<userId>` para arrancar offline.
 - PWA con manifest, íconos, service worker y precache.
 - **Tests con Vitest** para fechas, rubros, sugerencias, unidades de compras e ingredientes,
-  más el modo de la app y el adaptador offline.
+  más el modo de la app, el adaptador offline (ahora por hogar) y los links de invitación.
 - **Tests de interfaz con Playwright** (5 flujos críticos).
 - Repositorio git inicializado con historial (`main`).
 - README en español con setup y deploy.
@@ -113,7 +135,7 @@ recuperación de contraseña y el login desde la URL pública.
 | Modo local solo en tests (`--mode e2e` + `VITE_E2E_LOCAL=1`) | Playwright necesita un backend efímero, pero una build de producción nunca debe poder saltearse el login. |
 | `DataAdapter` | La UI no sabe si los datos son locales o remotos; se puede cambiar la persistencia. |
 | Adaptador offline que envuelve al de nube | Mantiene la lógica de Supabase intacta: la caché y la cola son una capa aparte y testeable. |
-| Caché y cola por usuario en `localStorage` | Evita mezclar datos entre cuentas en un mismo dispositivo y sobrevive a recargas. |
+| Caché y cola por **hogar** en `localStorage` | Dos miembros del mismo hogar ven la misma foto offline; hogares distintos siguen aislados. |
 | Encolar solo errores de red | Un error de RLS o validación no se arregla reintentando; se muestra y se descarta esa operación. |
 | Semana empieza lunes | Convención local y del público objetivo. |
 | `weekStart` ISO (`yyyy-MM-dd`) | Simple de ordenar, comparar y guardar como `date` en Supabase. |
@@ -133,6 +155,11 @@ recuperación de contraseña y el login desde la URL pública.
 | Nota del día como campo aparte | Sirve para recordatorios (“sobró arroz”) sin ensuciar el nombre del plato ni la lista de compras. |
 | Tests con Vitest (sin navegador) | Cubren la lógica pura (fechas, sugerencias, unidades, ingredientes) y corren rápido; los flujos visuales se siguen probando a mano. |
 | Recuperación detectada al inicio y guardada en `sessionStorage` | Supabase puede borrar el hash del link antes de que React monte; así la pantalla de contraseña nueva no se pierde. |
+| **Un hogar por usuario, todo compartido** | Es el caso de una pareja que cocina las mismas cenas: platos, semana, compras e historial son un solo tablero. |
+| **Links de invitación en el hash** (`#/unirse/<uuid>`) | No requieren SMTP ni Redirect URLs nuevas; el token se captura al arrancar y sobrevive al login como `comidas:invite`. |
+| **RPC `security definer` para membresías** | Evita recursión de RLS sobre `household_members` y que un usuario se autoasigne a un hogar ajeno. |
+| **`user_id` sin FK y nullable** | Borrar una cuenta no debe borrar por cascade los datos de un hogar compartido; queda solo como autoría. |
+| **Migración de datos sin pérdida** | La cuenta principal ya tiene 21 platos, 7 planes y 32 compras: se asocian a un hogar nuevo en vez de empezar de cero. |
 | Temas con variables CSS y `data-theme` | Un solo juego de utilidades Tailwind: el tema cambia redeclarando variables, sin duplicar clases ni componentes. |
 | Preferencia de tema por dispositivo | Es una decisión de pantalla, no un dato de la cuenta; no se sincroniza con Supabase. |
 
@@ -168,11 +195,12 @@ recuperación de contraseña y el login desde la URL pública.
   nuevo correspondiente; en el editor de platos también se normalizan al abrir y al guardar.
   Sin errores de consola.
 - Sin errores de página/consola en las pruebas realizadas.
-- **Tests automatizados (15/11/2026):** `npm test` corre **36 tests en 6 archivos**:
-  `date`, `constants`, `suggest`, `ingredients`, `appMode` y `offline`. Cubren conversión de
-  unidades, unificación de nombres, preservación de tildados/manuales, búsqueda tolerante a
-  errores de tipeo, cuenta obligatoria/modo de test, caché de lectura, cola de escrituras por
-  usuario, compactación y descarte de errores que no son de red.
+- **Tests automatizados (15/11/2026):** `npm test` corre **41 tests en 7 archivos**:
+  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline` e `invite`. Cubren
+  conversión de unidades, unificación de nombres, preservación de tildados/manuales, búsqueda
+  tolerante a errores de tipeo, cuenta obligatoria/modo de test, caché de lectura, cola de
+  escrituras por hogar (aislamiento, cola compartida y `rescope`), compactación, descarte de
+  errores que no son de red y parseo/armado de links de invitación.
 - **Git (15/11/2026):** repositorio inicializado, `.gitignore` revisado y primer commit
   `c4ed472` con los 50 archivos de la primera versión. El remoto
   `git@github.com:moloyo/FoodOrganizer.git` estaba vacío; el 15/11 se publicó `main`.
@@ -210,21 +238,35 @@ recuperación de contraseña y el login desde la URL pública.
 - **RLS con segunda cuenta (15/11/2026):** una cuenta temporal creada para la prueba vio solo su
   propio plato, la cuenta principal no lo vio, `delete_my_account` respondió 204, el token
   temporal dejó de servir (403) y los datos de la cuenta principal quedaron intactos.
-- **Offline (15/11/2026):** los 11 tests del adaptador cubren caché de platos/compras por semana,
+- **Offline (15/11/2026):** los tests del adaptador cubren caché de platos/compras por semana,
   no inventar listas vacías, encolar planes, compactar escrituras repetidas, separar la cola por
-  usuario, no encolar errores de RLS y cargar ejemplos sin red con ids UUID.
+  hogar, compartirla entre miembros, `rescope`, no encolar errores de RLS y cargar ejemplos sin
+  red con ids UUID.
+- **Hogares (15/11/2026, código listo):** `npx tsc -b` sin errores, `npm run build` correcto,
+  `npm test` 41/41 y `npm run test:e2e` 5/5 (el modo local tiene stubs de hogar y la sección se
+  oculta). La migración SQL está escrita pero **no aplicada** en Supabase ni desplegada.
 
 ## Limitaciones conocidas
 
-- **Falta la prueba real de offline en el celular.** El adaptador offline está cubierto por 11
-  tests y la UI muestra el estado de la cola, pero la prueba con la PWA instalada y modo avión
+- **Hogares sin aplicar.** La migración SQL y el cliente están listos pero no se ejecutaron en
+  Supabase ni se desplegaron; hasta entonces la app en producción sigue con el modelo viejo.
+  Hay que aplicar ambos juntos (breve ventana de indisponibilidad).
+- **Hogares sin prueba con dos cuentas reales.** El RLS nuevo se validó por diseño y con tests
+  unitarios, pero falta verificarlo con dos sesiones sobre el deploy.
+- **Falta la prueba real de offline en el celular.** El adaptador offline está cubierto por tests
+  y la UI muestra el estado de la cola, pero la prueba con la PWA instalada y modo avión
   no se hizo todavía.
 - **El primer uso necesita conexión.** La caché offline se llena con la primera lectura; sin red
   y sin datos guardados, la app avisa que no hay datos.
 - **La cola offline vive en el dispositivo.** Si se borran los datos del navegador antes de
   sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conflictos: la
-  última escritura que llega gana.
-- **No hay sincronización en tiempo real.** Otro dispositivo ve los cambios al recargar.
+  última escritura que llega gana. Con dos personas editando la misma semana a la vez, un
+  `replaceShopping` puede pisar la lista del otro.
+- **No hay sincronización en tiempo real.** Otro dispositivo (o el de tu pareja) ve los cambios
+  al recargar.
+- **`household_join` mueve los datos del hogar origen.** Para una cuenta nueva es inocuo, pero
+  si alguien con datos deja un hogar compartido uniéndose a otro, se lleva esos datos; “Salir del
+  hogar” en cambio los deja.
 - **No hay linter.** La lógica pura está cubierta con Vitest y los flujos críticos con
   Playwright; la PWA, el modo nube y los detalles visuales se siguen revisando a mano.
 - **La lista no detecta cambios internos de una receta.** Solo marca “desactualizada” cuando
@@ -233,8 +275,8 @@ recuperación de contraseña y el login desde la URL pública.
   lista solo se editan/borran los ítems manuales.
 - **Falta cambio de email** desde la app (la recuperación de contraseña y el borrado de cuenta
   ya están).
-- **El borrado de cuenta necesita el schema actualizado.** Si el proyecto no tiene la función
-  `delete_my_account()`, la app muestra un aviso para ejecutar `supabase/schema.sql`.
+- **El borrado de cuenta necesita la migración aplicada.** Si el proyecto no tiene la versión
+  nueva de `delete_my_account()`, la app muestra un aviso para ejecutar `migration_hogares.sql`.
 - **Importar en nube borra todo antes de insertar y no es transaccional.**
 - **La semana visible vuelve a la actual al recargar.** El plan y la lista se guardan, pero la
   navegación de semanas no se persiste.
@@ -268,34 +310,42 @@ recuperación de contraseña y el login desde la URL pública.
    - [x] configurar Site URL y Redirect URLs (`comidas-pi.vercel.app/**` y `localhost:5173/**`);
    - [x] probar el login y la recuperación de contraseña desde la URL pública.
    - [x] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
-3. **Reemplazar los platos de ejemplo por recetas reales** (o crear las propias y borrar los ejemplos).
+3. **Aplicar y probar hogares** (el código ya está listo):
+   - [ ] ejecutar `supabase/migration_hogares.sql` en el SQL Editor;
+   - [ ] confirmar que los 21 platos, 7 planes y 32 compras quedaron con `household_id`;
+   - [ ] desplegar el cliente nuevo (`git push` alcanza, Vercel está conectado);
+   - [ ] verificar RLS con dos cuentas: cada una ve solo su hogar y un `insert` con
+     `household_id` ajeno es rechazado;
+   - [ ] crear un link, unir a la segunda cuenta y comprobar que comparten tablero;
+   - [ ] probar “Salir del hogar” y borrado de cuenta con el hogar compartido.
+4. **Reemplazar los platos de ejemplo por recetas reales** (o crear las propias y borrar los ejemplos).
 
 ### P1 · Próximas mejoras
 
-4. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
-   (22 tests). [x] Vitest para el modo de la app y el adaptador offline (14 tests más; 36 en
-   total). [x] Playwright para los flujos críticos (5 tests: semana, plato, compras, temas).
-5. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
+5. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
+   (22 tests). [x] Vitest para el modo de la app, el adaptador offline y los links de
+   invitación (19 tests más; **41 en total**). [x] Playwright para los flujos críticos (5 tests).
+6. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
    unidades) y [x] unificar nombres al generar la lista.
-6. **Cuenta:** [x] recuperación de contraseña, [x] borrado de cuenta (requiere el schema nuevo) y
-   [x] cuenta obligatoria para usar la app.
-7. **Nota del día:** [x] UI para editar y guardar la nota.
-8. **Manejo offline en nube:** [x] caché de lectura por usuario, [x] cola de escrituras con
+7. **Cuenta:** [x] recuperación de contraseña, [x] borrado de cuenta, [x] cuenta obligatoria y
+   [x] hogar compartido (código listo; falta aplicar la migración).
+8. **Nota del día:** [x] UI para editar y guardar la nota.
+9. **Manejo offline en nube:** [x] caché de lectura por hogar, [x] cola de escrituras con
    reintento automático/manual y [x] aviso de estado en la interfaz.
-9. **Normalizar ingredientes ya guardados:** [x] acción en Ajustes.
-10. **Unificar nombres de ingredientes al generar la lista:** [x] incluido en `buildShoppingItems`.
+10. **Normalizar ingredientes ya guardados:** [x] acción en Ajustes.
+11. **Unificar nombres de ingredientes al generar la lista:** [x] incluido en `buildShoppingItems`.
 
 ### P2 · Ideas
 
-11. Cantidad de comensales y escalado de ingredientes.
-12. Fotos de platos.
-13. “Ya lo cociné” para mejorar sugerencias con el historial.
-14. Recordatorio semanal para planificar.
-15. Compartir recetas o semanas entre cuentas.
-16. Migraciones SQL versionadas (hoy el schema se corre a mano).
-17. Atajos de PWA y tema automático según el sistema (`prefers-color-scheme`).
-18. Cambio de email desde la app.
-19. Marcar recetas que no se quieren volver a sugerir.
+12. Cantidad de comensales y escalado de ingredientes.
+13. Fotos de platos.
+14. “Ya lo cociné” para mejorar sugerencias con el historial.
+15. Recordatorio semanal para planificar.
+16. Sincronización en tiempo real entre miembros del hogar (Supabase Realtime).
+17. Migraciones SQL versionadas (hoy el schema y la migración se corren a mano).
+18. Atajos de PWA y tema automático según el sistema (`prefers-color-scheme`).
+19. Cambio de email desde la app.
+20. Marcar recetas que no se quieren volver a sugerir.
 
 ## Cómo retomar
 
@@ -490,3 +540,32 @@ recuperación de contraseña y el login desde la URL pública.
   URL pública. Un primer link cayó en un proyecto viejo (`food-organizer`) porque el Site URL
   apuntaba ahí; ese proyecto duplicado se eliminó y quedó `comidas` como único deploy.
 - **Pendiente:** prueba real de offline en el celular con la PWA instalada.
+
+### 2026-11-15 · Hogares compartidos (código listo, migración pendiente)
+
+- **Decisión del usuario:** todo compartido (platos, semana, compras e historial), un hogar por
+  usuario, link de invitación, todos editan todo y migrar los datos existentes sin pérdida.
+- **Schema:** `supabase/migration_hogares.sql` (idempotente) crea `households`,
+  `household_members` y `household_invites`, agrega `household_id` a las 3 tablas, hace backfill
+  de las cuentas existentes, cambia el unique de `plans` y reemplaza las policies por
+  `is_household_member(household_id)`. `user_id` queda nullable y sin FK para que borrar una
+  cuenta no borre datos compartidos. `delete_my_account()` se reescribe para limpiar solo los
+  hogares que quedan vacíos.
+- **RPC nuevas:** `my_household`, `household_members_list`, `household_invite_create/list/revoke/info`,
+  `household_join`, `household_leave`, `household_rename` (todas `security definer`).
+- **Cliente:** `SessionUser` suma `householdId`; `DataAdapter` extiende `HouseholdAdapter`.
+  `cloud.ts` resuelve el hogar al iniciar sesión (con fallback en `localStorage` para offline) y
+  escribe/filtra por `household_id`. `offline.ts` cambia el ámbito de caché/cola al hogar, con
+  `rescope` al unirse/salir. `local.ts` tiene stubs para que Playwright siga pasando.
+- **UI:** `InviteScreen` (confirmación de unión), sección “Hogar” en Ajustes (nombre, miembros,
+  links, salir), aviso de invitación pendiente en `AuthScreen`, y `Gate` que atiende
+  `#/unirse/<token>` antes del tablero. `src/lib/invite.ts` captura el token en
+  `sessionStorage`.
+- **Tests:** se agregaron casos de cola por hogar (aislamiento, compartida y `rescope`) y
+  `tests/invite.test.ts`. `npm test` 41/41, `npm run build` correcto, `npx tsc -b` sin errores y
+  `npm run test:e2e` 5/5 (corrido 3 veces seguidas).
+- **Corrección de test flaco:** `shopping.spec.ts` exigía ver siempre los cuatro rubros, pero
+  “Sorpréndeme” es al azar y a veces no genera ítems de Dietética. Ahora valida que todos los
+  encabezados pertenezcan a los cuatro rubros permitidos (normalizando mayúsculas del CSS).
+- **Pendiente:** ejecutar la migración en Supabase, desplegar y verificar con dos cuentas. El
+  schema y el cliente deben actualizarse juntos: si falta uno de los dos, la app no arranca.

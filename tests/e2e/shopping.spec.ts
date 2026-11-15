@@ -14,7 +14,15 @@ test('la lista de compras agrupa, tilda y acepta ítems manuales', async ({ page
 
   await expect(page.getByText(/^Verdulería$/)).toBeVisible()
   await expect(page.getByText(/^Supermercado$/)).toBeVisible()
-  await expect(page.getByText(/^Dietética$/)).toBeVisible()
+  // La semana se arma al azar: puede no haber ítems de Dietética u Otros.
+  // Lo que sí exigimos es que ningún encabezado salga de los cuatro rubros válidos.
+  const categorías = await page.getByRole('heading', { level: 2 }).allInnerTexts()
+  expect(categorías.length).toBeGreaterThan(0)
+  const permitidas = ['verdulería', 'supermercado', 'dietética', 'otros']
+  for (const categoría of categorías) {
+    // El CSS muestra los encabezados en mayúsculas; innerText las refleja.
+    expect(permitidas).toContain(categoría.trim().toLocaleLowerCase('es-AR'))
+  }
   await expect(page.getByText(/\d+ pendientes/)).toBeVisible()
 
   await page.getByRole('button', { name: /^Marcar / }).first().click()
