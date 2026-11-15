@@ -97,6 +97,9 @@ pareja en dos dispositivos.
 - **Migración de datos**: `supabase/migration_hogares.sql` crea `households`,
   `household_members` y `household_invites`, agrega `household_id` a las tres tablas, migra las
   filas existentes sin perder nada y cambia el RLS a `is_household_member(household_id)`.
+- **Salir del hogar**: solo se habilita cuando queda otro miembro. Si sos el único, la UI lo
+  bloquea (el hogar vacío se borraría con todos sus datos) y sugiere usar una invitación o
+  “Borrar todos mis datos”. `canLeaveHousehold()` centraliza la regla y está cubierta por tests.
 - **Borrado de cuenta**: si el hogar tiene otros miembros, los datos compartidos sobreviven;
   si era el último, el hogar y sus datos se eliminan.
 
@@ -160,6 +163,7 @@ pareja en dos dispositivos.
 | **RPC `security definer` para membresías** | Evita recursión de RLS sobre `household_members` y que un usuario se autoasigne a un hogar ajeno. |
 | **`user_id` sin FK y nullable** | Borrar una cuenta no debe borrar por cascade los datos de un hogar compartido; queda solo como autoría. |
 | **Migración de datos sin pérdida** | La cuenta principal ya tiene 21 platos, 7 planes y 32 compras: se asocian a un hogar nuevo en vez de empezar de cero. |
+| **Bloquear “Salir” al único miembro** | La RPC borra el hogar vacío por cascade; perder todas las recetas por un botón de configuración es inaceptable. Para cambiar de hogar alcanza con un link de invitación. |
 | Temas con variables CSS y `data-theme` | Un solo juego de utilidades Tailwind: el tema cambia redeclarando variables, sin duplicar clases ni componentes. |
 | Preferencia de tema por dispositivo | Es una decisión de pantalla, no un dato de la cuenta; no se sincroniza con Supabase. |
 
@@ -195,12 +199,12 @@ pareja en dos dispositivos.
   nuevo correspondiente; en el editor de platos también se normalizan al abrir y al guardar.
   Sin errores de consola.
 - Sin errores de página/consola en las pruebas realizadas.
-- **Tests automatizados (15/11/2026):** `npm test` corre **41 tests en 7 archivos**:
-  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline` e `invite`. Cubren
-  conversión de unidades, unificación de nombres, preservación de tildados/manuales, búsqueda
-  tolerante a errores de tipeo, cuenta obligatoria/modo de test, caché de lectura, cola de
-  escrituras por hogar (aislamiento, cola compartida y `rescope`), compactación, descarte de
-  errores que no son de red y parseo/armado de links de invitación.
+- **Tests automatizados (15/11/2026):** `npm test` corre **44 tests en 8 archivos**:
+  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline`, `invite` y `household`.
+  Cubren conversión de unidades, unificación de nombres, preservación de tildados/manuales,
+  búsqueda tolerante a errores de tipeo, cuenta obligatoria/modo de test, caché de lectura, cola
+  de escrituras por hogar (aislamiento, cola compartida y `rescope`), compactación, descarte de
+  errores que no son de red, parseo/armado de links de invitación y la regla de salida del hogar.
 - **Git (15/11/2026):** repositorio inicializado, `.gitignore` revisado y primer commit
   `c4ed472` con los 50 archivos de la primera versión. El remoto
   `git@github.com:moloyo/FoodOrganizer.git` estaba vacío; el 15/11 se publicó `main`.
@@ -329,7 +333,7 @@ pareja en dos dispositivos.
 
 5. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
    (22 tests). [x] Vitest para el modo de la app, el adaptador offline y los links de
-   invitación (19 tests más; **41 en total**). [x] Playwright para los flujos críticos (5 tests).
+   invitación y la regla de salida (22 tests más; **44 en total**). [x] Playwright para los flujos críticos (5 tests).
 6. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
    unidades) y [x] unificar nombres al generar la lista.
 7. **Cuenta:** [x] recuperación de contraseña, [x] borrado de cuenta, [x] cuenta obligatoria y
@@ -575,5 +579,18 @@ pareja en dos dispositivos.
 - **Corrección de test flaco:** `shopping.spec.ts` exigía ver siempre los cuatro rubros, pero
   “Sorpréndeme” es al azar y a veces no genera ítems de Dietética. Ahora valida que todos los
   encabezados pertenezcan a los cuatro rubros permitidos (normalizando mayúsculas del CSS).
-- **Pendiente:** ejecutar la migración en Supabase, desplegar y verificar con dos cuentas. El
-  schema y el cliente deben actualizarse juntos: si falta uno de los dos, la app no arranca.
+- **Pendiente:** prueba del flujo real con la pareja en dos dispositivos.
+
+### 2026-11-15 · Bloqueo de salida para hogar de un solo miembro
+
+- **Problema detectado:** `household_leave()` borra el hogar cuando no quedan miembros y el
+  cascade elimina platos, planes, compras e invitaciones. El texto de Ajustes decía que “los
+  datos compartidos quedan en el hogar”, lo cual es falso para ese caso.
+- **Decisión del usuario:** bloquear la salida (sin cambiar SQL).
+- **Implementación:** `src/lib/household.ts` con `canLeaveHousehold()` (`memberCount > 1`);
+  la sección “Salir del hogar” muestra un texto explicativo en vez del botón cuando la persona
+  es la única, y `handleLeaveHousehold()` tiene guardia defensiva con la misma regla.
+- **Tests:** `tests/household.test.ts` (3 casos). `npm test` pasa a **44/44**; README,
+  `DESARROLLO.md` y este estado actualizados.
+- **No se tocó la migración SQL:** el borrado de cuenta del último miembro sigue eliminando el
+  hogar (intencional y documentado).

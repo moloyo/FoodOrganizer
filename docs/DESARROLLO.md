@@ -175,6 +175,12 @@ sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conf
   normal (cuenta nueva, hogar vacío) no hay nada que mover. Si alguien con datos abandona un
   hogar compartido para unirse a otro, esos datos viajan con él; “Salir del hogar” en cambio los
   deja donde están.
+- **Salir siendo único miembro:** `household_leave()` borraría el hogar vacío y el cascade se
+  llevaría platos, planes y compras. `canLeaveHousehold()` (`src/lib/household.ts`) bloquea la
+  acción en la UI (`memberCount > 1`) y el handler tiene guardia defensiva con el mismo criterio.
+  El botón se reemplaza por un texto que sugiere usar una invitación o “Borrar todos mis datos”.
+  El borrado de **cuenta** sí elimina el hogar cuando era el último miembro (está documentado y
+  es intencional).
 
 ## Sistema de temas
 
@@ -255,6 +261,7 @@ Comidas/
 │  │  ├─ appMode.ts            # cloud | e2e-local | unconfigured
 │  │  ├─ uuid.ts               # isUuid / newUuid compartidos
 │  │  ├─ invite.ts             # Captura y armado de links de invitación
+│  │  ├─ household.ts          # Regla para bloquear la salida de un hogar de un solo miembro
 │  │  ├─ suggest.ts            # Sugerencias y armado de lista de compras
 │  │  ├─ ingredients.ts        # Catálogo, normalización y búsqueda de ingredientes
 │  │  ├─ constants.ts          # Modos, colores, categorías, categorización
@@ -284,7 +291,7 @@ Comidas/
 ├─ index.html                  # Script que aplica el tema antes del primer render
 ├─ supabase/schema.sql         # Tablas base + RLS + delete_my_account()
 ├─ supabase/migration_hogares.sql # Hogares, membresías, invitaciones y RLS por hogar
-├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite)
+├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite, household)
 ├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas)
 ├─ tests/e2e/env/.env          # Entorno de test (VITE_E2E_LOCAL=1) para forzar el modo local
 ├─ vitest.config.ts            # Configuración de Vitest
@@ -549,6 +556,7 @@ Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, rev
 | `tests/appMode.test.ts` | Cuenta obligatoria: `cloud`, `unconfigured` y modo local solo con `--mode e2e` + `VITE_E2E_LOCAL=1`. |
 | `tests/offline.test.ts` | Errores de red, caché de lectura, cola por hogar (aislamiento y compartida), compactación, `rescope`, errores de RLS y ejemplos offline. |
 | `tests/invite.test.ts` | Parseo del token en el hash y armado del link de invitación. |
+| `tests/household.test.ts` | Bloqueo de “Salir del hogar” cuando hay un solo miembro. |
 
 Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
 necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
@@ -616,6 +624,8 @@ Antes de publicar, correr `npm test` y probar en `npm run dev`:
 - [ ] Un cambio hecho por un miembro aparece para el otro al recargar.
 - [ ] “Salir del hogar”: los datos compartidos siguen visibles para quien queda y quien salió
       ve un hogar nuevo vacío.
+- [ ] Siendo el único miembro, “Salir del hogar” no muestra botón y explica que hay que usar
+      una invitación.
 - [ ] Con dos cuentas, verificar por SQL que un `select` con el JWT de la segunda no ve filas
       de un hogar ajeno (RLS por `is_household_member`).
 - [ ] `npm run build` y `npm run preview`: la PWA se instala y funciona offline.

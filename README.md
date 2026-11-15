@@ -111,8 +111,9 @@ En **Ajustes → Hogar** se ve el nombre, los miembros y los links de invitació
 “Crear link de invitación” genera una URL `#/unirse/<token>` válida 7 días y revocable; quien la
 abre inicia sesión (o crea una cuenta) y confirma que quiere unirse. Al unirse, sus datos se
 mueven al hogar compartido y su hogar anterior vacío se elimina. “Salir del hogar” deja los datos
-compartidos donde están y crea un hogar nuevo vacío para esa persona. Si el último miembro se va
-o borra su cuenta, el hogar y sus datos se eliminan.
+compartidos donde están y crea un hogar nuevo vacío **cuando queda otro miembro**; si sos el
+único, la UI bloquea la salida para no borrar todo por cascade (para cambiar de hogar se usa un
+link de invitación). Si el último miembro **borra su cuenta**, el hogar y sus datos sí se eliminan.
 
 ## Ideas para seguir
 

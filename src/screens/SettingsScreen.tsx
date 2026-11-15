@@ -25,6 +25,7 @@ import { ScreenHeader } from '../components/Shell'
 import { Button, Input } from '../components/ui'
 import { MODES } from '../lib/constants'
 import { buildInviteLink } from '../lib/invite'
+import { canLeaveHousehold } from '../lib/household'
 import { readTheme, storeTheme, THEMES, type ThemeId } from '../lib/theme'
 import { useInstallPrompt } from '../lib/useInstallPrompt'
 import type { Snapshot } from '../types'
@@ -87,6 +88,7 @@ export function SettingsScreen() {
   const activeInvites = householdInvites.filter(
     (invite) => !invite.revokedAt && new Date(invite.expiresAt) > new Date(),
   )
+  const puedeSalir = canLeaveHousehold(household)
 
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
 
@@ -256,6 +258,13 @@ export function SettingsScreen() {
   }
 
   async function handleLeaveHousehold() {
+    if (!canLeaveHousehold(household)) {
+      toast(
+        'Sos el único miembro del hogar. Abrí un link de invitación para cambiarte.',
+        'info',
+      )
+      return
+    }
     if (
       !window.confirm(
         '¿Salir del hogar? Los datos compartidos quedan en el hogar y vas a pasar a un hogar nuevo vacío.',
@@ -484,21 +493,46 @@ export function SettingsScreen() {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-danger-border bg-danger-soft/60 p-4">
-                <p className="text-[13px] font-semibold text-danger-strong">Salir del hogar</p>
-                <p className="mt-1 text-[11.5px] leading-relaxed text-danger-ink">
-                  Los datos compartidos quedan en el hogar y pasás a un hogar nuevo vacío.
-                </p>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  className="mt-3"
-                  onClick={() => void handleLeaveHousehold()}
-                  disabled={householdBusy === 'leave'}
+              <div
+                className={clsx(
+                  'rounded-2xl border p-4',
+                  puedeSalir
+                    ? 'border-danger-border bg-danger-soft/60'
+                    : 'border-line bg-cream',
+                )}
+              >
+                <p
+                  className={clsx(
+                    'text-[13px] font-semibold',
+                    puedeSalir ? 'text-danger-strong' : 'text-ink',
+                  )}
                 >
-                  <LogOut className="size-3.5" />
-                  {householdBusy === 'leave' ? 'Saliendo…' : 'Salir del hogar'}
-                </Button>
+                  Salir del hogar
+                </p>
+                {puedeSalir ? (
+                  <>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-danger-ink">
+                      Los datos compartidos quedan en el hogar y pasás a un hogar nuevo vacío.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      className="mt-3"
+                      onClick={() => void handleLeaveHousehold()}
+                      disabled={householdBusy === 'leave'}
+                    >
+                      <LogOut className="size-3.5" />
+                      {householdBusy === 'leave' ? 'Saliendo…' : 'Salir del hogar'}
+                    </Button>
+                  </>
+                ) : (
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+                    Sos el único miembro: si salieras, el hogar y todos sus datos se
+                    borrarían. Para cambiarte a otro hogar abrí un link de invitación (tus
+                    platos viajan con vos). Si querés empezar de cero, usá “Borrar todos
+                    mis datos”.
+                  </p>
+                )}
               </div>
             </div>
           )}
