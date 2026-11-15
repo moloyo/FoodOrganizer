@@ -16,8 +16,9 @@ cola de escrituras** por usuario: sin conexión se ven los últimos datos y los 
 reintentan al volver la red.
 
 El deploy está publicado en Vercel (**<https://comidas-pi.vercel.app>**) con las variables de
-Supabase cargadas: la URL pública muestra el login y exige cuenta. Falta cargar esa URL en las
-Redirect URLs de Supabase y probar el login en dos dispositivos.
+Supabase cargadas: la URL pública muestra el login y exige cuenta. Las **Redirect URLs de
+Supabase ya están configuradas** (Site URL y allowlist) y el usuario verificó el flujo de
+recuperación de contraseña y el login desde la URL pública.
 
 ## Qué está hecho
 
@@ -215,11 +216,9 @@ Redirect URLs de Supabase y probar el login en dos dispositivos.
 
 ## Limitaciones conocidas
 
-- **Redirect URLs de Supabase pendientes.** El login por contraseña ya funciona en la URL
-  pública, pero la confirmación de email y el link de recuperación necesitan que
-  `https://comidas-pi.vercel.app` esté cargada en **Authentication → URL Configuration**.
-- **Falta la prueba de login en dos dispositivos.** Se verificó con dos cuentas vía API, pero no
-  con dos sesiones reales sobre el deploy.
+- **Falta la prueba real de offline en el celular.** El adaptador offline está cubierto por 11
+  tests y la UI muestra el estado de la cola, pero la prueba con la PWA instalada y modo avión
+  no se hizo todavía.
 - **El primer uso necesita conexión.** La caché offline se llena con la primera lectura; sin red
   y sin datos guardados, la app avisa que no hay datos.
 - **La cola offline vive en el dispositivo.** Si se borran los datos del navegador antes de
@@ -266,8 +265,8 @@ Redirect URLs de Supabase y probar el login en dos dispositivos.
      - [x] lectura anónima vacía y rechazo de escritura con `user_id` ajeno;
      - [x] dos sesiones reales simultáneas (cuenta temporal; `delete_my_account` respondió 204);
    - [x] configurar el deploy en Vercel con las variables de Supabase;
-   - [ ] configurar Redirect URLs para el deploy;
-   - [ ] probar login en dos dispositivos.
+   - [x] configurar Site URL y Redirect URLs (`comidas-pi.vercel.app/**` y `localhost:5173/**`);
+   - [x] probar el login y la recuperación de contraseña desde la URL pública.
    - [x] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
 3. **Reemplazar los platos de ejemplo por recetas reales** (o crear las propias y borrar los ejemplos).
 
@@ -483,8 +482,11 @@ Redirect URLs de Supabase y probar el login en dos dispositivos.
   **Preview** (nunca en el repo).
 - **URL de producción:** <https://comidas-pi.vercel.app>.
 - **Verificación:** en un contexto limpio de Chrome la URL pública muestra el login (no la
-  pantalla de configuración ni datos locales), sin errores de consola. El login por
-  contraseña usa Supabase directo, así que no depende de las Redirect URLs.
-- **Pendiente:** cargar la URL en **Authentication → URL Configuration** de Supabase (Site URL
-  y Redirect URLs) para confirmación de email y recuperación de contraseña; probar el login en
-  dos dispositivos.
+  pantalla de configuración ni datos locales), sin errores de consola; `sw.js` y el manifest
+  responden 200.
+- **URLs de Supabase (15/11/2026):** se configuraron **Site URL =
+  `https://comidas-pi.vercel.app`** y Redirect URLs (`https://comidas-pi.vercel.app/**` y
+  `http://localhost:5173/**`). El usuario verificó el link de recuperación y el login desde la
+  URL pública. Un primer link cayó en un proyecto viejo (`food-organizer`) porque el Site URL
+  apuntaba ahí; ese proyecto duplicado se eliminó y quedó `comidas` como único deploy.
+- **Pendiente:** prueba real de offline en el celular con la PWA instalada.

@@ -560,7 +560,9 @@ propósito.
   (**Authentication → URL Configuration**: Site URL y Redirect URLs) para confirmación de email y
   recuperación de contraseña.
 - **Deploy actual:** <https://comidas-pi.vercel.app> (proyecto `comidas`, conectado a
-  `moloyo/FoodOrganizer`). Para redesplegar: `npx vercel --prod`.
+  `moloyo/FoodOrganizer`). Para redesplegar: `npx vercel --prod`. Es la URL canónica: Site URL
+  y Redirect URLs de Supabase ya apuntan acá (`comidas-pi.vercel.app/**`); el proyecto
+  `food-organizer` duplicado se eliminó.
 - Para instalar la PWA hace falta **HTTPS** (o `localhost`).
 - El service worker usa `registerType: 'autoUpdate'` y precachea JS/CSS/HTML/fuentes/íconos.
   Tras un deploy, puede hacer falta recargar una vez para tomar la versión nueva.

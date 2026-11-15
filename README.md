@@ -82,8 +82,8 @@ En Vercel, importá el repo, dejá el build `npm run build` y el output `dist`, 
 (**Production** y **Preview**). Sin ellas, la URL pública muestra la pantalla de configuración.
 
 Producción: **<https://comidas-pi.vercel.app>** (proyecto `comidas` de Vercel, conectado a
-`moloyo/FoodOrganizer`). Después de cambiar la URL o el dominio, actualizá las Redirect URLs en
-Supabase.
+`moloyo/FoodOrganizer`). Es la URL canónica: Site URL y Redirect URLs de Supabase ya están
+configuradas; si cambiás de dominio, actualizalas en Authentication → URL Configuration.
 
 ## Modelo de datos
 
