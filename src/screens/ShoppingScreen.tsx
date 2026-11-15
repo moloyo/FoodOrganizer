@@ -1,19 +1,22 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
   Check,
+  Pencil,
   Plus,
   RefreshCw,
   Share2,
   ShoppingBasket,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../state/AppContext'
 import { ScreenHeader } from '../components/Shell'
-import { Button, EmptyState, Input } from '../components/ui'
+import { Button, EmptyState, Input, Sheet } from '../components/ui'
 import { CATEGORIES, CATEGORY_COLORS, guessCategory } from '../lib/constants'
 import { formatWeekRange } from '../lib/date'
 import { sortShopping } from '../lib/suggest'
+import type { ShoppingItem } from '../types'
 
 export function ShoppingScreen() {
   const {
@@ -22,6 +25,8 @@ export function ShoppingScreen() {
     regenerateShopping,
     toggleShopping,
     addShoppingItem,
+    updateShoppingItem,
+    deleteShoppingItem,
     clearCheckedShopping,
     weekStart,
     days,
@@ -31,6 +36,9 @@ export function ShoppingScreen() {
 
   const [text, setText] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [editing, setEditing] = useState<ShoppingItem | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDetail, setEditDetail] = useState('')
 
   const ordered = useMemo(() => sortShopping(shopping), [shopping])
   const checked = shopping.filter((item) => item.checked).length
@@ -65,6 +73,30 @@ export function ShoppingScreen() {
     if (!value) return
     setText('')
     await addShoppingItem(value, guessCategory(value))
+  }
+
+  function openEdit(item: ShoppingItem) {
+    const [name, ...rest] = item.text.split(' · ')
+    setEditing(item)
+    setEditName(name)
+    setEditDetail(rest.join(' · '))
+  }
+
+  async function saveEdit() {
+    if (!editing) return
+    const name = editName.trim()
+    if (!name) {
+      toast('Poné un nombre al ítem.', 'error')
+      return
+    }
+    const detail = editDetail.trim()
+    await updateShoppingItem(editing.id, `${name}${detail ? ` · ${detail}` : ''}`)
+    setEditing(null)
+  }
+
+  async function removeItem(item: ShoppingItem) {
+    if (!window.confirm(`¿Quitar "${item.text}" de la lista?`)) return
+    await deleteShoppingItem(item.id)
   }
 
   async function handleShare() {
@@ -211,36 +243,100 @@ export function ShoppingScreen() {
               </div>
               <div className="card divide-y divide-line overflow-hidden">
                 {items.map((item) => (
-                  <button
+                  <div
                     key={item.id}
-                    onClick={() => void toggleShopping(item.id)}
-                    className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition hover:bg-brand-soft/15"
+                    className="flex items-center gap-1 pl-3.5 pr-1.5 transition hover:bg-brand-soft/15"
                   >
-                    <span
-                      className={clsx(
-                        'grid size-5 shrink-0 place-items-center rounded-md border transition',
-                        item.checked
-                          ? 'border-brand bg-brand text-on-brand'
-                          : 'border-line-strong bg-field',
-                      )}
+                    <button
+                      onClick={() => void toggleShopping(item.id)}
+                      className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left"
+                      aria-label={item.checked ? `Desmarcar ${item.text}` : `Marcar ${item.text}`}
                     >
-                      {item.checked && <Check className="size-3.5" strokeWidth={3} />}
-                    </span>
-                    <span
-                      className={clsx(
-                        'text-[13.5px] leading-snug transition',
-                        item.checked ? 'text-muted line-through' : 'text-ink',
-                      )}
-                    >
-                      {item.text}
-                    </span>
-                  </button>
+                      <span
+                        className={clsx(
+                          'grid size-5 shrink-0 place-items-center rounded-md border transition',
+                          item.checked
+                            ? 'border-brand bg-brand text-on-brand'
+                            : 'border-line-strong bg-field',
+                        )}
+                      >
+                        {item.checked && <Check className="size-3.5" strokeWidth={3} />}
+                      </span>
+                      <span
+                        className={clsx(
+                          'min-w-0 text-[13.5px] leading-snug transition',
+                          item.checked ? 'text-muted line-through' : 'text-ink',
+                        )}
+                      >
+                        {item.text}
+                      </span>
+                    </button>
+                    {item.dishId === null && (
+                      <div className="flex shrink-0 items-center">
+                        <button
+                          onClick={() => openEdit(item)}
+                          className="grid size-7 place-items-center rounded-lg text-muted transition hover:bg-cream hover:text-brand"
+                          aria-label={`Editar ${item.text}`}
+                          title="Editar ítem"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                        <button
+                          onClick={() => void removeItem(item)}
+                          className="grid size-7 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger-ink"
+                          aria-label={`Quitar ${item.text}`}
+                          title="Quitar ítem"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </section>
           ))}
         </div>
       )}
+
+      <Sheet
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title="Editar ítem"
+        subtitle="Solo los ítems manuales se pueden editar o borrar."
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>
+              Cancelar
+            </Button>
+            <Button className="flex-1" onClick={() => void saveEdit()}>
+              Guardar
+            </Button>
+          </div>
+        }
+      >
+        <label className="block">
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Nombre
+          </span>
+          <Input
+            value={editName}
+            onChange={(event) => setEditName(event.target.value)}
+            placeholder="Ej.: Pan rallado"
+            autoFocus
+          />
+        </label>
+        <label className="mt-3 block">
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Cantidad / detalle
+          </span>
+          <Input
+            value={editDetail}
+            onChange={(event) => setEditDetail(event.target.value)}
+            placeholder="Ej.: 500 g, 2 u, 1 lata"
+          />
+        </label>
+      </Sheet>
     </div>
   )
 }

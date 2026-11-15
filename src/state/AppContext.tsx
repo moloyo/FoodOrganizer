@@ -18,10 +18,15 @@ import type {
 } from '../types'
 import { getAdapter, cloudConfigured, makeId } from '../lib/adapters'
 import { currentWeekStart } from '../lib/date'
+import { normalizeCategory } from '../lib/constants'
+import {
+  buildIngredientCatalog,
+  canonicalIngredientName,
+} from '../lib/ingredients'
 import {
   buildShoppingItems,
   matchesMode,
-  mergeChecked,
+  mergeShopping,
   pickSuggestion,
   suggestWeek,
 } from '../lib/suggest'
@@ -55,19 +60,26 @@ interface AppContextValue {
   shiftWeek: (amount: number) => void
   setDayMode: (day: number, mode: DayMode | null) => Promise<void>
   setDayDish: (day: number, dishId: string | null) => Promise<void>
+  setDayNote: (day: number, note: string) => Promise<void>
   shuffleDay: (day: number) => Promise<void>
   fillEmptyDays: () => Promise<number>
   clearWeek: () => Promise<void>
   repeatWeek: (sourceWeekStart: string) => Promise<number>
   saveDish: (dish: Dish) => Promise<void>
   deleteDish: (id: string) => Promise<void>
+  normalizeIngredients: () => Promise<number>
   regenerateShopping: () => Promise<void>
   toggleShopping: (id: string) => Promise<void>
   addShoppingItem: (text: string, category: string) => Promise<void>
+  updateShoppingItem: (id: string, text: string) => Promise<void>
+  deleteShoppingItem: (id: string) => Promise<void>
   clearCheckedShopping: () => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>
   signOut: () => Promise<void>
+  resetPassword: (email: string) => Promise<void>
+  updatePassword: (password: string) => Promise<void>
+  deleteAccount: () => Promise<void>
   loadExamples: () => Promise<number>
   exportData: () => Promise<Snapshot>
   importData: (snapshot: Snapshot) => Promise<void>
@@ -262,6 +274,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [persistDay],
   )
 
+  const setDayNote = useCallback(
+    async (day: number, note: string) => {
+      await persistDay(day, { note })
+    },
+    [persistDay],
+  )
+
   const shuffleDay = useCallback(
     async (day: number) => {
       const current = days.find((item) => item.day === day)
@@ -390,9 +409,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [adapter, reloadAll, toast],
   )
 
+  const normalizeIngredients = useCallback(async () => {
+    // Unifica variantes viejas ("queso", "eso") con el nombre canónico y reasigna
+    // rubros anteriores. Solo guarda los platos que realmente cambian.
+    const catalog = buildIngredientCatalog(dishes)
+    const changed: Dish[] = []
+    for (const dish of dishes) {
+      let dirty = false
+      const ingredients = dish.ingredients.map((ingredient) => {
+        const name = canonicalIngredientName(catalog, ingredient.name)
+        const category = ingredient.category
+          ? normalizeCategory(ingredient.category, name)
+          : ingredient.category
+        if (name !== ingredient.name || category !== ingredient.category) dirty = true
+        return { ...ingredient, name, category }
+      })
+      if (dirty) changed.push({ ...dish, ingredients })
+    }
+
+    if (changed.length === 0) {
+      toast('Los ingredientes ya están normalizados.', 'info')
+      return 0
+    }
+
+    const byId = new Map(changed.map((dish) => [dish.id, dish]))
+    setDishes((prev) => prev.map((dish) => byId.get(dish.id) ?? dish))
+    try {
+      await Promise.all(changed.map((dish) => adapter.saveDish(dish)))
+      toast(
+        `${changed.length} plato${changed.length === 1 ? '' : 's'} con ingredientes normalizados.`,
+        'success',
+      )
+      return changed.length
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : 'No pudimos normalizar los ingredientes.',
+        'error',
+      )
+      await reloadAll()
+      return 0
+    }
+  }, [adapter, dishes, reloadAll, toast])
+
   const regenerateShopping = useCallback(async () => {
     const fresh = buildShoppingItems(days, dishes)
-    const merged = mergeChecked(shopping, fresh, makeId)
+    const merged = mergeShopping(shopping, fresh, makeId)
     setShopping(merged)
     try {
       await adapter.replaceShopping(weekStart, merged)
@@ -448,6 +509,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [adapter, shopping, toast, weekStart])
 
+  const updateShoppingItem = useCallback(
+    async (id: string, text: string) => {
+      const next = shopping.map((item) => (item.id === id ? { ...item, text } : item))
+      setShopping(next)
+      try {
+        await adapter.replaceShopping(weekStart, next)
+        toast('Ítem actualizado.', 'success')
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'No pudimos editar el ítem.', 'error')
+        await reloadAll()
+      }
+    },
+    [adapter, reloadAll, shopping, toast, weekStart],
+  )
+
+  const deleteShoppingItem = useCallback(
+    async (id: string) => {
+      const next = shopping.filter((item) => item.id !== id)
+      setShopping(next)
+      try {
+        await adapter.deleteShoppingItem(id)
+        toast('Ítem quitado de la lista.', 'success')
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'No pudimos quitar el ítem.', 'error')
+      }
+    },
+    [adapter, shopping, toast],
+  )
+
   const signIn = useCallback(
     async (email: string, password: string) => {
       await adapter.signIn(email, password)
@@ -463,6 +553,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await adapter.signOut()
     setUser(null)
+  }, [adapter])
+
+  const resetPassword = useCallback(
+    async (email: string) => {
+      await adapter.resetPassword(email)
+    },
+    [adapter],
+  )
+
+  const updatePassword = useCallback(
+    async (password: string) => {
+      await adapter.updatePassword(password)
+    },
+    [adapter],
+  )
+
+  const deleteAccount = useCallback(async () => {
+    await adapter.deleteAccount()
+    setUser(null)
+    setDishes([])
+    setAllPlans([])
+    setShopping([])
+    setHistory([])
   }, [adapter])
 
   const loadExamples = useCallback(async () => {
@@ -525,19 +638,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     shiftWeek,
     setDayMode,
     setDayDish,
+    setDayNote,
     shuffleDay,
     fillEmptyDays,
     clearWeek,
     repeatWeek,
     saveDish,
     deleteDish,
+    normalizeIngredients,
     regenerateShopping,
     toggleShopping,
     addShoppingItem,
+    updateShoppingItem,
+    deleteShoppingItem,
     clearCheckedShopping,
     signIn,
     signUp,
     signOut,
+    resetPassword,
+    updatePassword,
+    deleteAccount,
     loadExamples,
     exportData,
     importData,

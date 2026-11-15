@@ -174,6 +174,38 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       if (error) throw new Error(error.message)
     },
 
+    async resetPassword(email) {
+      const redirectTo =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${window.location.pathname}`
+          : undefined
+      const { error } = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo })
+      if (error) throw new Error(traducirAuthError(error.message))
+    },
+
+    async updatePassword(password) {
+      const { error } = await client.auth.updateUser({ password })
+      if (error) throw new Error(traducirAuthError(error.message))
+    },
+
+    async deleteAccount() {
+      const { error } = await client.rpc('delete_my_account')
+      if (error) {
+        if (
+          error.code === 'PGRST202' ||
+          /delete_my_account/i.test(error.message) ||
+          /function .* does not exist/i.test(error.message)
+        ) {
+          throw new Error(
+            'Falta actualizar el schema de Supabase: ejecutá supabase/schema.sql para habilitar el borrado de cuenta.',
+          )
+        }
+        throw new Error(error.message)
+      }
+      cachedUserId = null
+      await client.auth.signOut().catch(() => {})
+    },
+
     async listDishes() {
       const { data, error } = await client
         .from('dishes')
@@ -372,6 +404,12 @@ function traducirAuthError(message: string): string {
   if (lower.includes('email not confirmed')) return 'Confirmá tu email antes de ingresar.'
   if (lower.includes('user already registered')) return 'Ese email ya tiene una cuenta.'
   if (lower.includes('password should be at least')) return 'La contraseña necesita al menos 6 caracteres.'
+  if (lower.includes('new password should be different')) {
+    return 'La contraseña nueva tiene que ser distinta de la anterior.'
+  }
+  if (lower.includes('email rate limit exceeded')) {
+    return 'Mandaste demasiados emails seguidos. Esperá unos minutos y probá de nuevo.'
+  }
   if (lower.includes('unable to validate email')) return 'El email no parece válido.'
   return message
 }

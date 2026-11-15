@@ -6,8 +6,8 @@ import { Logo } from '../components/Shell'
 import { Button, Input } from '../components/ui'
 
 export function AuthScreen() {
-  const { signIn, signUp } = useApp()
-  const [mode, setMode] = useState<'in' | 'up'>('in')
+  const { signIn, signUp, resetPassword } = useApp()
+  const [mode, setMode] = useState<'in' | 'up' | 'forgot'>('in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -19,13 +19,24 @@ export function AuthScreen() {
     setError('')
     setNotice('')
 
-    if (!email.trim() || password.length < 6) {
-      setError('Ingresá un email y una contraseña de al menos 6 caracteres.')
+    if (!email.trim()) {
+      setError('Ingresá tu email.')
+      return
+    }
+    if (mode !== 'forgot' && password.length < 6) {
+      setError('La contraseña necesita al menos 6 caracteres.')
       return
     }
 
     setLoading(true)
     try {
+      if (mode === 'forgot') {
+        await resetPassword(email.trim())
+        setNotice(
+          'Si ese email tiene una cuenta, te va a llegar un link para elegir una contraseña nueva.',
+        )
+        return
+      }
       if (mode === 'in') {
         await signIn(email.trim(), password)
       } else {
@@ -58,32 +69,41 @@ export function AuthScreen() {
         </div>
 
         <div className="card mt-7 p-5">
-          <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-cream p-1">
-            {(
-              [
-                { id: 'in', label: 'Ingresar' },
-                { id: 'up', label: 'Crear cuenta' },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => {
-                  setMode(tab.id)
-                  setError('')
-                  setNotice('')
-                }}
-                className={clsx(
-                  'rounded-lg py-2 text-[12.5px] font-semibold transition',
-                  mode === tab.id
-                    ? 'bg-surface text-ink shadow-sm'
-                    : 'text-muted hover:text-ink',
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          {mode === 'forgot' ? (
+            <div className="mb-4">
+              <p className="text-[13px] font-semibold text-ink">Recuperar contraseña</p>
+              <p className="mt-0.5 text-[11.5px] leading-snug text-muted">
+                Poné el email de tu cuenta y te mandamos un link para elegir una nueva.
+              </p>
+            </div>
+          ) : (
+            <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-cream p-1">
+              {(
+                [
+                  { id: 'in', label: 'Ingresar' },
+                  { id: 'up', label: 'Crear cuenta' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setMode(tab.id)
+                    setError('')
+                    setNotice('')
+                  }}
+                  className={clsx(
+                    'rounded-lg py-2 text-[12.5px] font-semibold transition',
+                    mode === tab.id
+                      ? 'bg-surface text-ink shadow-sm'
+                      : 'text-muted hover:text-ink',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <form onSubmit={submit} className="space-y-3">
             <label className="block">
@@ -100,19 +120,37 @@ export function AuthScreen() {
                 required
               />
             </label>
-            <label className="block">
-              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
-                Contraseña
-              </span>
-              <Input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Mínimo 6 caracteres"
-                autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
-                required
-              />
-            </label>
+            {mode !== 'forgot' && (
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  Contraseña
+                </span>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Mínimo 6 caracteres"
+                  autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
+                  required
+                />
+              </label>
+            )}
+
+            {mode === 'in' && (
+              <div className="-mt-1 text-right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('forgot')
+                    setError('')
+                    setNotice('')
+                  }}
+                  className="text-[11.5px] font-semibold text-brand underline decoration-brand/30 underline-offset-2"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+            )}
 
             {error && (
               <p className="rounded-xl bg-danger-soft px-3 py-2 text-[12px] font-medium text-danger-strong">
@@ -126,12 +164,16 @@ export function AuthScreen() {
             )}
 
             <Button type="submit" className="w-full" loading={loading}>
-              {mode === 'in' ? 'Entrar' : 'Crear mi cuenta'}
+              {mode === 'in' ? 'Entrar' : mode === 'up' ? 'Crear mi cuenta' : 'Mandar link'}
             </Button>
           </form>
 
           <p className="mt-3 text-center text-[11px] leading-relaxed text-muted">
-            {mode === 'in' ? '¿Primera vez?' : '¿Ya tenés cuenta?'}{' '}
+            {mode === 'forgot'
+              ? '¿Ya la recordaste?'
+              : mode === 'in'
+                ? '¿Primera vez?'
+                : '¿Ya tenés cuenta?'}{' '}
             <button
               type="button"
               onClick={() => {
@@ -141,7 +183,7 @@ export function AuthScreen() {
               }}
               className="font-semibold text-brand underline decoration-brand/30 underline-offset-2"
             >
-              {mode === 'in' ? 'Creá tu cuenta' : 'Ingresá'}
+              {mode === 'forgot' ? 'Ingresá' : mode === 'in' ? 'Creá tu cuenta' : 'Ingresá'}
             </button>
           </p>
         </div>

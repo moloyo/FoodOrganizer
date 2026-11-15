@@ -12,6 +12,7 @@ import {
   Sun,
   Trash2,
   Upload,
+  Wand2,
   Waves,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -43,7 +44,9 @@ export function SettingsScreen() {
     exportData,
     importData,
     loadExamples,
+    normalizeIngredients,
     wipeData,
+    deleteAccount,
     dishes,
     toast,
   } = useApp()
@@ -95,6 +98,37 @@ export function SettingsScreen() {
     } finally {
       setBusy(null)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  async function handleNormalize() {
+    setBusy('normalize')
+    try {
+      await normalizeIngredients()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (
+      !window.confirm(
+        '¿Eliminar tu cuenta y todos tus datos de la nube? Esta acción no se puede deshacer.',
+      )
+    ) {
+      return
+    }
+    if (!window.confirm('Última confirmación: se borra tu cuenta y no vas a poder recuperarla.')) {
+      return
+    }
+    setBusy('delete-account')
+    try {
+      await deleteAccount()
+      toast('Tu cuenta y tus datos fueron eliminados.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'No pudimos eliminar la cuenta.', 'error')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -256,6 +290,15 @@ export function SettingsScreen() {
             <span className="flex-1 text-[13px] font-medium text-ink">Cargar platos de ejemplo</span>
             <span className="text-[11px] text-muted">{dishes.length} platos</span>
           </button>
+          <button
+            onClick={() => void handleNormalize()}
+            disabled={busy === 'normalize'}
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-brand-soft/20 disabled:opacity-60"
+          >
+            <Wand2 className="size-4 text-brand" />
+            <span className="flex-1 text-[13px] font-medium text-ink">Normalizar ingredientes</span>
+            <span className="text-[11px] text-muted">Unificar nombres</span>
+          </button>
         </div>
         <input
           ref={fileRef}
@@ -328,20 +371,37 @@ export function SettingsScreen() {
       </Section>
 
       <Section title="Zona peligrosa">
-        <button
-          onClick={() => {
-            if (
-              window.confirm('¿Borrar todos los platos, menús y compras? No se puede deshacer.') &&
-              window.confirm('Última confirmación: se van a borrar todos tus datos.')
-            ) {
-              void wipeData()
-            }
-          }}
-          className="flex w-full items-center gap-3 rounded-2xl border border-danger-border bg-danger-soft/60 px-4 py-3.5 text-left transition hover:bg-danger-soft"
-        >
-          <Trash2 className="size-4 text-danger-ink" />
-          <span className="flex-1 text-[13px] font-medium text-danger-strong">Borrar todos mis datos</span>
-        </button>
+        <div className="space-y-2">
+          {isCloud && (
+            <button
+              onClick={() => void handleDeleteAccount()}
+              disabled={busy === 'delete-account'}
+              className="flex w-full items-center gap-3 rounded-2xl border border-danger-border bg-danger-soft/60 px-4 py-3.5 text-left transition hover:bg-danger-soft disabled:opacity-60"
+            >
+              <Trash2 className="size-4 text-danger-ink" />
+              <span className="flex-1 text-[13px] font-medium text-danger-strong">
+                Eliminar mi cuenta
+              </span>
+              <span className="text-[10.5px] text-danger-ink/70">Cuenta y datos</span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (
+                window.confirm('¿Borrar todos los platos, menús y compras? No se puede deshacer.') &&
+                window.confirm('Última confirmación: se van a borrar todos tus datos.')
+              ) {
+                void wipeData()
+              }
+            }}
+            className="flex w-full items-center gap-3 rounded-2xl border border-danger-border bg-danger-soft/60 px-4 py-3.5 text-left transition hover:bg-danger-soft"
+          >
+            <Trash2 className="size-4 text-danger-ink" />
+            <span className="flex-1 text-[13px] font-medium text-danger-strong">
+              Borrar todos mis datos
+            </span>
+          </button>
+        </div>
       </Section>
 
       <footer className="mt-8 flex flex-col items-center gap-1 pb-2 text-center">

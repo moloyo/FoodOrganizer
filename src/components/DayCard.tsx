@@ -1,11 +1,21 @@
+import { useState } from 'react'
 import clsx from 'clsx'
-import { ArrowLeftRight, Clock, Dices, Snowflake, UtensilsCrossed, X } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Clock,
+  Dices,
+  Snowflake,
+  StickyNote,
+  UtensilsCrossed,
+  X,
+} from 'lucide-react'
 import type { DayPlan, Dish } from '../types'
-import { DAY_SHORT, isToday as isTodayDate } from '../lib/date'
+import { DAY_NAMES, DAY_SHORT, isToday as isTodayDate } from '../lib/date'
 import { modeMeta } from '../lib/constants'
 import { matchesMode } from '../lib/suggest'
 import { useApp } from '../state/AppContext'
 import { ModeChips, ModeTag } from './ModeChips'
+import { Button, Sheet, Textarea } from './ui'
 
 export function DayCard({
   day,
@@ -20,9 +30,11 @@ export function DayCard({
   onPick: () => void
   onView: () => void
 }) {
-  const { setDayMode, setDayDish, shuffleDay, toast } = useApp()
+  const { setDayMode, setDayDish, setDayNote, shuffleDay, toast } = useApp()
   const today = isTodayDate(date)
   const meta = modeMeta(day.mode)
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [noteDraft, setNoteDraft] = useState('')
 
   async function handleModeChange(mode: DayPlan['mode']) {
     if (dish && !matchesMode(dish, mode)) {
@@ -31,6 +43,16 @@ export function DayCard({
       return
     }
     await setDayMode(day.day, mode)
+  }
+
+  function openNote() {
+    setNoteDraft(day.note)
+    setNoteOpen(true)
+  }
+
+  async function saveNote() {
+    await setDayNote(day.day, noteDraft.trim())
+    setNoteOpen(false)
   }
 
   return (
@@ -139,8 +161,53 @@ export function DayCard({
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={openNote}
+            className="mt-1.5 flex w-full items-start gap-1.5 rounded-lg px-1.5 py-1 text-left transition hover:bg-brand-soft/20"
+            aria-label={day.note ? 'Editar nota del día' : 'Agregar nota del día'}
+          >
+            <StickyNote className="mt-0.5 size-3 shrink-0 text-muted" />
+            <span
+              className={clsx(
+                'min-w-0 flex-1 whitespace-pre-wrap text-[11px] leading-snug',
+                day.note ? 'text-muted' : 'italic text-muted/60',
+              )}
+            >
+              {day.note || 'Agregar nota del día'}
+            </span>
+          </button>
         </div>
       </div>
+
+      <Sheet
+        open={noteOpen}
+        onClose={() => setNoteOpen(false)}
+        title="Nota del día"
+        subtitle={`${DAY_NAMES[day.day]} ${date.getDate()}`}
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setNoteOpen(false)}>
+              Cancelar
+            </Button>
+            <Button className="flex-1" onClick={() => void saveNote()}>
+              Guardar nota
+            </Button>
+          </div>
+        }
+      >
+        <Textarea
+          rows={4}
+          value={noteDraft}
+          onChange={(event) => setNoteDraft(event.target.value)}
+          placeholder="Ej.: sobró arroz, usarlo el jueves. Comprar pan antes de salir."
+          autoFocus
+        />
+        <p className="mt-2 text-[11.5px] leading-relaxed text-muted">
+          La nota queda guardada con este día y no cambia las sugerencias ni la lista de compras.
+        </p>
+      </Sheet>
     </section>
   )
 }

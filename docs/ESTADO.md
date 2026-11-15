@@ -1,6 +1,6 @@
 # Estado del proyecto · Comidas
 
-> Última actualización: **14 de noviembre de 2026**.
+> Última actualización: **15 de noviembre de 2026**.
 > Guía técnica y de convenciones: [`DESARROLLO.md`](DESARROLLO.md).
 
 ## Resumen
@@ -23,6 +23,8 @@ cuenta real.
 - “Sorpréndeme” por día y “Sorpréndeme” para completar toda la semana sin repetir platos.
 - Cambiar dificultad conserva el plato si sigue siendo válido; si no, lo quita con aviso.
 - Elegir plato, ver receta, pedir otra sugerencia o quitar el plato.
+- **Nota por día:** texto libre (“sobró arroz, usarlo el jueves”) que se guarda con el día
+  y no interviene en las sugerencias ni en la lista de compras.
 - Contador de cenas planificadas y acción para vaciar la semana.
 
 ### Recetario
@@ -41,7 +43,12 @@ cuenta real.
 - Generación de la lista desde los platos de la semana, agrupada por rubro.
 - **Cuatro rubros fijos:** Verdulería, Supermercado, Dietética y Otros. El rubro se deduce del
   nombre del ingrediente y se puede cambiar a mano en el editor de platos.
-- Suma cantidades numéricas y conserva los tildados al regenerar.
+- **Unidades compatibles:** suma y convierte masas (g/kg), volúmenes (ml/l/cda/cdta/taza) y
+  unidades. “500 g + 1 kg” → “1.5 kg”; “200 ml + 1 cda” → “215 ml”; “3 cda + 2 cda” → “5 cda”.
+- Unifica nombres de ingredientes sin distinguir mayúsculas, tildes ni espacios.
+- **Ítems manuales editables:** se pueden cambiar el nombre y la cantidad, o quitarlos de la
+  lista. Los ítems generados desde un plato no se editan a mano.
+- Suma cantidades numéricas y conserva los tildados **y los ítems manuales** al regenerar.
 - Ítems manuales, tildado persistente y acción de compartir/copiar.
 - Aviso de lista desactualizada cuando se agrega un plato sin ítems.
 
@@ -55,17 +62,25 @@ cuenta real.
 - **Tema de la interfaz:** clásico (cálido), cool (azul) y oscuro, con vista previa.
   Se aplica al instante y queda guardado en este dispositivo.
 - Modo local/nube y cuenta (ingresar, crear cuenta, salir).
+- **Recuperación de contraseña:** “¿Olvidaste tu contraseña?” manda un link por email y abre una
+  pantalla para elegir la nueva. También “Volver al ingreso” para descartar el cambio.
+- **Eliminar la cuenta** (solo en nube, con doble confirmación): borra la cuenta de Supabase y,
+  por las claves foráneas en cascada, todos sus platos, planes y compras.
 - Instalar PWA (con instructivo para iOS).
 - Exportar/importar backup JSON.
 - Cargar los 20 platos de ejemplo.
+- **Normalizar ingredientes:** unifica variantes ya guardadas (“queso” → “Queso”) y reasigna
+  rubros viejos en todos los platos.
 - Pasos para conectar Supabase.
 - Leyenda de dificultades y borrado total de datos.
 
 ### Base técnica
 
 - Adaptador de datos abstracto con implementaciones local (`localStorage`) y nube (Supabase).
-- `supabase/schema.sql` con tablas, índices y RLS.
+- `supabase/schema.sql` con tablas, índices, RLS y la función `delete_my_account()`.
 - PWA con manifest, íconos, service worker y precache.
+- **Tests con Vitest** para fechas, rubros, sugerencias, unidades de compras e ingredientes.
+- Repositorio git inicializado con historial (`main`).
 - README en español con setup y deploy.
 - Responsive mobile-first; sin desbordes horizontales a 390 px.
 
@@ -91,6 +106,11 @@ cuenta real.
 | Cuatro rubros de compras (Verdulería, Supermercado, Dietética, Otros) | Menos secciones y más parecidas a cómo se recorre una compra real; lo que no encaja queda en Otros. |
 | Categorización por la coincidencia más larga de palabras clave | Resuelve los casos mixtos: “tomate triturado” va a Supermercado y “arroz integral” a Dietética, en vez de depender del orden de la lista. |
 | `normalizeCategory` reasigna rubros viejos | Los datos ya guardados (Frutas, Almacén, Lácteos y huevos…) se muestran en los rubros nuevos sin migración ni pérdida de datos. |
+| Conversión de unidades al generar compras | Evita comprar de más: g/kg, ml/l y cucharadas se suman en una sola línea; las unidades libres (“puñado”, “lata”) se conservan tal cual. |
+| Ítems manuales con `dishId: null` | Distingue lo que escribió el usuario de lo generado por una receta, para permitir editarlo/borrarlo y preservarlo al regenerar. |
+| Nota del día como campo aparte | Sirve para recordatorios (“sobró arroz”) sin ensuciar el nombre del plato ni la lista de compras. |
+| Tests con Vitest (sin navegador) | Cubren la lógica pura (fechas, sugerencias, unidades, ingredientes) y corren rápido; los flujos visuales se siguen probando a mano. |
+| Recuperación detectada al inicio y guardada en `sessionStorage` | Supabase puede borrar el hash del link antes de que React monte; así la pantalla de contraseña nueva no se pierde. |
 | Temas con variables CSS y `data-theme` | Un solo juego de utilidades Tailwind: el tema cambia redeclarando variables, sin duplicar clases ni componentes. |
 | Preferencia de tema por dispositivo | Es una decisión de pantalla, no un dato de la cuenta; no se sincroniza con Supabase. |
 
@@ -126,38 +146,65 @@ cuenta real.
   nuevo correspondiente; en el editor de platos también se normalizan al abrir y al guardar.
   Sin errores de consola.
 - Sin errores de página/consola en las pruebas realizadas.
+- **Tests automatizados (15/11/2026):** `npm test` corre 22 tests en 4 archivos
+  (`date`, `constants`, `suggest`, `ingredients`) y pasan todos. Incluyen conversión de
+  unidades, unificación de nombres, preservación de tildados/manuales y búsqueda tolerante a
+  errores de tipeo.
+- **Git (15/11/2026):** repositorio inicializado, `.gitignore` revisado y primer commit
+  `c4ed472` con las 50 archivos de la primera versión. El remoto configurado es
+  `git@github.com:moloyo/FoodOrganizer.git`; al momento de esta revisión el remoto estaba
+  vacío, así que no había nada para traer.
+- **Nota del día (15/11/2026):** probada en un build local (`dist-test`): se guarda, aparece en
+  la tarjeta y sobrevive a la recarga.
+- **Compras (15/11/2026):** probado en build local: un “Sorpréndeme” completo generó 26 ítems
+  en Verdulería/Supermercado/Dietética; “Aceite de oliva · 260 ml”, “Salsa de soja · 3 cda” y
+  “Perejil · 1 puñado” muestran la conversión y el respeto por unidades libres. Un ítem manual
+  se creó, editó y conservó tras recargar y tras “Generar”; un ítem tildado siguió tildado.
+- **Normalizar ingredientes (15/11/2026):** un plato con “tomate” en rubro “Frutas” quedó como
+  “Tomate” en “Verdulería” después de la acción de Ajustes.
+- **Recuperación de contraseña (15/11/2026):** en modo nube, “¿Olvidaste tu contraseña?” muestra
+  solo el email y “Mandar link”; un link con `type=recovery` abre la pantalla de contraseña
+  nueva incluso si el hash se limpia; “Volver al ingreso” descarta el cambio y limpia la marca.
+- **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
+  queda en ~625 kB (aviso de tamaño, no bloqueante).
 
 ## Limitaciones conocidas
 
 - **Modo nube conectado, pero falta la prueba completa.** El schema, las tablas, RLS y el
   endpoint de auth ya se verificaron; falta registrarse, crear platos/menús y confirmar la
   sincronización entre dispositivos.
-- **No hay tests automatizados ni linter.** La verificación es manual.
-- **La lista de compras no convierte unidades.** “Aceite” en `ml` y en `cdas` aparece en
-  dos líneas. Tampoco se puede borrar un ítem manual desde la UI (el método del adaptador existe).
+- **No hay tests de interfaz.** La lógica pura está cubierta con Vitest, pero los flujos
+  visuales (semana, modales, PWA) se verifican a mano; no hay Playwright ni linter.
 - **La lista no detecta cambios internos de una receta.** Solo marca “desactualizada” cuando
   hay un plato planificado sin ítems; hay que regenerarla a mano.
-- **El campo `note` de los días se guarda pero no tiene UI.**
-- **No hay recuperación de contraseña, cambio de email ni borrado de cuenta.**
+- **Cambiar un ítem generado desde una receta** obliga a editar el plato y regenerar; en la
+  lista solo se editan/borran los ítems manuales.
+- **Falta cambio de email** desde la app (la recuperación de contraseña y el borrado de cuenta
+  ya están).
+- **El borrado de cuenta necesita el schema actualizado.** Si el proyecto no tiene la función
+  `delete_my_account()`, la app muestra un aviso para ejecutar `supabase/schema.sql`.
 - **En modo nube no hay cola offline.** Sin red, las acciones fallan con un toast.
 - **Importar en nube borra todo antes de insertar y no es transaccional.**
 - **No hay sincronización en tiempo real.** Otro dispositivo ve los cambios al recargar.
-- **El autocompletado no corrige ingredientes ya guardados.** Solo normaliza al editar o crear
-  un plato; las variantes viejas (“queso”, “eso”) siguen en la base hasta corregirlas a mano.
+- **La normalización de ingredientes es manual.** El autocompletado corrige al crear/editar y
+  “Normalizar ingredientes” recorre todo el recetario, pero no se ejecuta sola.
 - **El tema es por dispositivo.** No se guarda en la cuenta ni se sincroniza entre equipos.
 - **El rubro es una sugerencia por nombre.** La autodetección cubre lo habitual, pero un
   ingrediente nuevo puede caer en “Otros”; se corrige a mano en el editor del plato.
-- **Los rubros viejos se normalizan al mostrarse, no se reescriben.** Los datos guardados con
-  categorías anteriores siguen así en la base hasta editar el plato o regenerar la lista.
+- **Los rubros viejos se reescriben solo al normalizar.** Se muestran bien desde el primer
+  momento, pero la base conserva el valor anterior hasta editar el plato, regenerar la lista
+  o usar “Normalizar ingredientes”.
 - **Recetas de ejemplo provisorias.** Sirven para probar, no son el recetario definitivo.
 - **Sin escalado por comensales ni fotos.**
-- **El repo no está inicializado como git.** Conviene hacerlo para tener historial y respaldo.
 
 ## Pendientes priorizados
 
 ### P0 · Antes de usar la app en serio
 
-1. **Inicializar git** (`git init`, `.gitignore` ya existe) y hacer el primer commit.
+1. **Git local listo.** Repositorio inicializado, `.gitignore` y primer commit `c4ed472`.
+   - [x] `git init` + commit inicial.
+   - [ ] Publicar el historial en el remoto (`git@github.com:moloyo/FoodOrganizer.git`); al
+     revisar, el remoto estaba vacío. Definir si se hace `push` de `main`.
 2. **Terminar de probar Supabase de punta a punta** con el proyecto real:
    - [x] ejecutar `supabase/schema.sql`;
    - [x] cargar las variables en `.env.local`;
@@ -165,17 +212,20 @@ cuenta real.
    - [ ] registrar una segunda cuenta y verificar que cada una ve solo sus datos (RLS);
    - [ ] configurar Redirect URLs para el deploy;
    - [ ] probar login en dos dispositivos.
+   - [ ] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
 3. **Reemplazar los platos de ejemplo por recetas reales** (o crear las propias y borrar los ejemplos).
 
 ### P1 · Próximas mejoras
 
-4. Tests: Vitest para `suggest.ts`/`date.ts` y Playwright para los flujos críticos.
-5. Compras: borrar ítems manuales, normalizar unidades y permitir editar cantidades.
-6. Cuenta: recuperación de contraseña y borrado de cuenta.
-7. UI para la nota del día (el dato ya existe en el modelo).
-8. Manejo offline en nube (lectura en caché y reintento de escrituras).
-9. Normalizar ingredientes ya guardados (por ejemplo, unificar “queso” y “Queso” en platos viejos).
-10. Compras: unificar nombres de ingredientes al generar la lista (además de las cantidades).
+4. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
+   (22 tests). [ ] Playwright para los flujos críticos.
+5. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
+   unidades) y [x] unificar nombres al generar la lista.
+6. **Cuenta:** [x] recuperación de contraseña y [x] borrado de cuenta (requiere el schema nuevo).
+7. **Nota del día:** [x] UI para editar y guardar la nota.
+8. **Manejo offline en nube:** pendiente (caché de lectura y reintento de escrituras).
+9. **Normalizar ingredientes ya guardados:** [x] acción en Ajustes.
+10. **Unificar nombres de ingredientes al generar la lista:** [x] incluido en `buildShoppingItems`.
 
 ### P2 · Ideas
 
@@ -186,14 +236,17 @@ cuenta real.
 15. Compartir recetas o semanas entre cuentas.
 16. Migraciones SQL versionadas (hoy el schema se corre a mano).
 17. Atajos de PWA y tema automático según el sistema (`prefers-color-scheme`).
+18. Cambio de email desde la app.
+19. Marcar recetas que no se quieren volver a sugerir.
 
 ## Cómo retomar
 
 1. Leer [`DESARROLLO.md`](DESARROLLO.md) (setup, arquitectura y convenciones).
 2. `npm install` si hace falta y `npm run dev`.
-3. Revisar los pendientes P0 de arriba.
-4. Antes de cerrar una sesión de trabajo: `npm run build`, actualizar la bitácora y,
-   si se agregó una decisión importante, sumarla a la tabla de decisiones.
+3. Correr `npm test` para confirmar que la lógica sigue sana.
+4. Revisar los pendientes P0 de arriba.
+5. Antes de cerrar una sesión de trabajo: `npm test`, `npm run build`, actualizar la bitácora
+   y, si se agregó una decisión importante, sumarla a la tabla de decisiones.
 
 ## Bitácora
 
@@ -286,3 +339,30 @@ cuenta real.
   rubro nuevo; editor de platos con las cuatro opciones y normalización al guardar; sin errores
   de consola. `npm run build` correcto.
 - Se actualizaron `DESARROLLO.md` (reglas de categorización) y `README.md`.
+
+### 2026-11-15 · Tests, compras más inteligentes y cuenta
+
+- **Tests:** se agregó Vitest (`vitest.config.ts`, scripts `test`/`test:watch`) con 22 tests
+  en `tests/`: fechas y semanas, rubros y palabra clave más larga, sugerencias por dificultad,
+  unificación/conversión de unidades, preservación de tildados y manuales, catálogo y búsqueda
+  de ingredientes (incluido “eso” → “Queso”).
+- **Compras:** `buildShoppingItems` ahora unifica nombres y unidades compatibles:
+  - masa: 500 g + 1 kg → `1.5 kg`;
+  - volumen: 200 ml + 1 cda → `215 ml`, 1 l + 500 ml → `1.5 l`;
+  - cucharadas: 3 cda + 2 cda → `5 cda` (no pasa a ml);
+  - unidades: 2 u + 1 unidad → `3 u`;
+  - unidades libres (“puñado”, “lata”) se muestran con ` + `.
+- **Ítems manuales:** se pueden editar (nombre + cantidad/detalle) y borrar desde la lista;
+  los generados por receta no. `mergeShopping` conserva tildados **y** manuales al regenerar.
+- **Nota del día:** botón en cada tarjeta, `Sheet` con textarea y guardado por `setDayNote`.
+- **Normalizar ingredientes:** acción en Ajustes que reescribe nombres y rubros viejos en todos
+  los platos; informa cuántos cambió.
+- **Cuenta:** recuperación de contraseña (link + pantalla nueva) y eliminación de cuenta con
+  doble confirmación. `supabase/schema.sql` incorpora `delete_my_account()`
+  (`security definer`, borra `auth.users` y cae en cascada).
+- **`recovery.ts`:** detecta `type=recovery` en el primer arranque y lo guarda en
+  `sessionStorage`, porque Supabase puede limpiar el hash antes de montar React.
+- **Git:** commit inicial `c4ed472`; se configuró el remoto `moloyo/FoodOrganizer`. La clave
+  `~/.ssh/id_public` autentica como `moloyo`; el remoto todavía está vacío.
+- Verificación: `npm test` (22/22), `npm run build` correcto, y prueba manual en build local de
+  nota, alta/edición/borrado de manuales, regeneración, normalización y recuperación.

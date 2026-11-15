@@ -78,3 +78,22 @@ create policy "plans_owner_all" on public.plans
 drop policy if exists "shopping_owner_all" on public.shopping_items;
 create policy "shopping_owner_all" on public.shopping_items
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+--  Borrado de cuenta desde la app
+--  Borra la fila de auth.users del usuario actual; las tablas
+--  públicas se limpian por las foreign keys con on delete cascade.
+--  La app la llama con supabase.rpc('delete_my_account').
+-- ------------------------------------------------------------
+create or replace function public.delete_my_account()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  delete from auth.users where id = auth.uid();
+$$;
+
+revoke all on function public.delete_my_account() from public;
+revoke all on function public.delete_my_account() from anon;
+grant execute on function public.delete_my_account() to authenticated;

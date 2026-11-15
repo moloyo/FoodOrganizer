@@ -10,17 +10,19 @@ Pensada mobile-first, en español, para cocina vegetariana.
 - [`docs/ESTADO.md`](docs/ESTADO.md): qué está hecho, decisiones, limitaciones, pendientes y
   bitácora de cambios. **Empezá por acá si retomás el proyecto.**
 
-> Estado actual: funcional en modo local y conectado a un proyecto real de Supabase. Falta
-> completar la prueba de escritura/registro con una cuenta real.
+> Estado actual: funcional en modo local y conectado a un proyecto real de Supabase. La lógica
+> está cubierta con tests (Vitest) y falta completar la prueba de escritura/registro con una
+> cuenta real.
 
 ## Qué hace
 
-- **Semana**: para cada día elegís una dificultad (Del freezer, Muy fácil, Fácil, Media, Elaborada) y la app sugiere platos que encajan.
+- **Semana**: para cada día elegís una dificultad (Del freezer, Muy fácil, Fácil, Media, Elaborada) y la app sugiere platos que encajan. Podés dejar una nota por día ("sobró arroz, usarlo el jueves").
 - **Recetario**: platos con dificultad, tiempo, etiquetas, ingredientes, pasos, link y si son aptos para freezer. El nombre del ingrediente se autocompleta para evitar duplicados.
 - **Sugerencias**: "Sorpréndeme" completa los días vacíos sin repetir platos y priorizando favoritos.
-- **Compras**: arma la lista de la semana agrupada en Verdulería, Supermercado, Dietética y Otros, suma cantidades y conserva lo tildado.
+- **Compras**: arma la lista de la semana agrupada en Verdulería, Supermercado, Dietética y Otros, suma cantidades compatibles (500 g + 1 kg → 1.5 kg), conserva lo tildado y deja editar o borrar los ítems manuales.
 - **Historial**: guarda las semanas planificadas para consultarlas o repetirlas.
 - **Temas**: clásico, cool y oscuro, se eligen en Ajustes y se recuerdan en cada dispositivo.
+- **Cuenta (nube)**: ingreso, registro, recuperación de contraseña y eliminación de cuenta.
 - **PWA**: se instala en el celular, funciona sin conexión y se abre como app.
 
 ## Stack
@@ -56,6 +58,7 @@ La app detecta si hay credenciales de Supabase:
 ```bash
 npm install
 npm run dev      # http://localhost:5173
+npm test         # tests de lógica (Vitest)
 npm run build    # genera dist/
 npm run preview  # sirve el build
 npm run icons    # regenera los íconos PWA (requiere sharp)
@@ -76,7 +79,7 @@ Si usás Vercel/Netlify, cargá `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` c
 | Tabla | Para qué |
 | --- | --- |
 | `dishes` | Recetario: dificultad, minutos, tags, ingredientes (`jsonb`), pasos, freezer. |
-| `plans` | Una fila por día: `week_start` (lunes), `day` 0–6, `mode` y `dish_id`. |
+| `plans` | Una fila por día: `week_start` (lunes), `day` 0–6, `mode`, `dish_id` y `note`. |
 | `shopping_items` | Lista de compras por semana, con tildado y rubro. |
 
 Todas las tablas tienen RLS: cada usuario solo accede a sus filas (`auth.uid() = user_id`).

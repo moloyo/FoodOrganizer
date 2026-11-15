@@ -1,5 +1,6 @@
 import type { DayMode, DayPlan, Dish, Ingredient, ShoppingItem } from '../types'
 import { CATEGORIES, DIFFICULTY_RANK, normalizeCategory } from './constants'
+import { formatIngredientName, normalizeIngredientName } from './ingredients'
 
 export interface CandidateOptions {
   includeEasier?: boolean
@@ -86,9 +87,65 @@ export function suggestWeek(
 interface GroupedIngredient {
   name: string
   quantities: string[]
+  units: string[]
+  unitInfos: (UnitInfo | null)[]
   unit: string
   category: string
   dishId: string | null
+}
+
+type UnitDimension = 'mass' | 'volume' | 'count'
+
+interface UnitInfo {
+  dimension: UnitDimension
+  /** Cuánto vale una unidad en la unidad base (g, ml o unidad). */
+  factor: number
+  /** Unidad canónica para mostrar (cda, cdta, kg, u…). */
+  display: string
+}
+
+function normalizeUnit(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\.$/, '')
+    .trim()
+}
+
+const UNIT_ALIASES: Record<string, UnitInfo> = {
+  g: { dimension: 'mass', factor: 1, display: 'g' },
+  gr: { dimension: 'mass', factor: 1, display: 'g' },
+  gramo: { dimension: 'mass', factor: 1, display: 'g' },
+  gramos: { dimension: 'mass', factor: 1, display: 'g' },
+  kg: { dimension: 'mass', factor: 1000, display: 'kg' },
+  kilo: { dimension: 'mass', factor: 1000, display: 'kg' },
+  kilos: { dimension: 'mass', factor: 1000, display: 'kg' },
+  ml: { dimension: 'volume', factor: 1, display: 'ml' },
+  mililitro: { dimension: 'volume', factor: 1, display: 'ml' },
+  mililitros: { dimension: 'volume', factor: 1, display: 'ml' },
+  l: { dimension: 'volume', factor: 1000, display: 'l' },
+  lt: { dimension: 'volume', factor: 1000, display: 'l' },
+  litro: { dimension: 'volume', factor: 1000, display: 'l' },
+  litros: { dimension: 'volume', factor: 1000, display: 'l' },
+  cda: { dimension: 'volume', factor: 15, display: 'cda' },
+  cdas: { dimension: 'volume', factor: 15, display: 'cda' },
+  cucharada: { dimension: 'volume', factor: 15, display: 'cda' },
+  cucharadas: { dimension: 'volume', factor: 15, display: 'cda' },
+  cdta: { dimension: 'volume', factor: 5, display: 'cdta' },
+  cdtas: { dimension: 'volume', factor: 5, display: 'cdta' },
+  cucharadita: { dimension: 'volume', factor: 5, display: 'cdta' },
+  cucharaditas: { dimension: 'volume', factor: 5, display: 'cdta' },
+  taza: { dimension: 'volume', factor: 240, display: 'taza' },
+  tazas: { dimension: 'volume', factor: 240, display: 'taza' },
+  u: { dimension: 'count', factor: 1, display: 'u' },
+  un: { dimension: 'count', factor: 1, display: 'u' },
+  unidad: { dimension: 'count', factor: 1, display: 'u' },
+  unidades: { dimension: 'count', factor: 1, display: 'u' },
+}
+
+function unitInfo(unit: string): UnitInfo | null {
+  return UNIT_ALIASES[normalizeUnit(unit)] ?? null
 }
 
 function parseQty(value: string): number | null {
@@ -103,8 +160,34 @@ function formatQty(value: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, '')
 }
 
-function capitalizeFirst(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1)
+function displayQuantity(
+  total: number,
+  info: UnitInfo,
+  units: string[],
+): { quantity: string; unit: string } {
+  const displays = new Set(
+    units.map((unit) => unitInfo(unit)?.display).filter((value): value is string => Boolean(value)),
+  )
+
+  // Si todas las cantidades usan la misma unidad "de cocina" (cda, cdta, taza, kg…),
+  // la mantenemos en vez de pasarlas a ml/g.
+  if (displays.size === 1) {
+    const only = [...displays][0]
+    const factor = UNIT_ALIASES[normalizeUnit(only)]?.factor ?? 1
+    return { quantity: formatQty(total / factor), unit: only }
+  }
+
+  if (info.dimension === 'mass') {
+    if (total >= 1000) return { quantity: formatQty(total / 1000), unit: 'kg' }
+    return { quantity: formatQty(total), unit: 'g' }
+  }
+
+  if (info.dimension === 'volume') {
+    if (total >= 1000) return { quantity: formatQty(total / 1000), unit: 'l' }
+    return { quantity: formatQty(total), unit: 'ml' }
+  }
+
+  return { quantity: formatQty(total), unit: 'u' }
 }
 
 export function buildShoppingItems(days: DayPlan[], dishes: Dish[]): Omit<ShoppingItem, 'id'>[] {
@@ -119,14 +202,24 @@ export function buildShoppingItems(days: DayPlan[], dishes: Dish[]): Omit<Shoppi
       if (!name) continue
       const unit = (ingredient.unit ?? '').trim()
       const category = normalizeCategory(ingredient.category, name)
-      const key = `${category}|${name.toLowerCase()}|${unit.toLowerCase()}`
+      const info = unitInfo(unit)
+      // Los nombres y las unidades compatibles se unifican: "Queso" y "queso",
+      // "500 g" y "1 kg", "200 ml" y "1 cda". Las unidades libres quedan aparte.
+      const unitKey = info ? `dim:${info.dimension}` : `unit:${normalizeUnit(unit)}`
+      const key = `${category}|${normalizeIngredientName(name)}|${unitKey}`
       const existing = groups.get(key)
       if (existing) {
-        if (ingredient.qty.trim()) existing.quantities.push(ingredient.qty.trim())
+        if (ingredient.qty.trim()) {
+          existing.quantities.push(ingredient.qty.trim())
+          existing.units.push(unit)
+          existing.unitInfos.push(info)
+        }
       } else {
         groups.set(key, {
           name,
           quantities: ingredient.qty.trim() ? [ingredient.qty.trim()] : [],
+          units: ingredient.qty.trim() ? [unit] : [],
+          unitInfos: ingredient.qty.trim() ? [info] : [],
           unit,
           category,
           dishId: dish.id,
@@ -137,18 +230,27 @@ export function buildShoppingItems(days: DayPlan[], dishes: Dish[]): Omit<Shoppi
 
   const items: Omit<ShoppingItem, 'id'>[] = []
   for (const group of groups.values()) {
-    let quantityText = ''
     const numeric = group.quantities.map(parseQty)
-    if (group.quantities.length > 0 && numeric.every((n) => n !== null)) {
-      const sum = (numeric as number[]).reduce((total, n) => total + n, 0)
-      quantityText = formatQty(sum)
+    const allNumeric = numeric.length > 0 && numeric.every((n) => n !== null)
+    let quantityText = ''
+    let unitText = group.unit
+    const dimensionInfo = group.unitInfos.find((info): info is UnitInfo => Boolean(info))
+
+    if (dimensionInfo && allNumeric) {
+      const total = (numeric as number[]).reduce(
+        (sum, n, index) => sum + n * (group.unitInfos[index]?.factor ?? dimensionInfo.factor),
+        0,
+      )
+      const shown = displayQuantity(total, dimensionInfo, group.units)
+      quantityText = shown.quantity
+      unitText = shown.unit
     } else if (group.quantities.length > 0) {
       quantityText = [...new Set(group.quantities)].join(' + ')
     }
 
-    const detail = [quantityText, group.unit].filter(Boolean).join(' ')
+    const detail = [quantityText, unitText].filter(Boolean).join(' ')
     items.push({
-      text: `${capitalizeFirst(group.name)}${detail ? ` · ${detail}` : ''}`,
+      text: `${formatIngredientName(group.name)}${detail ? ` · ${detail}` : ''}`,
       category: group.category,
       checked: false,
       dishId: group.dishId,
@@ -180,6 +282,16 @@ export function mergeChecked(
     id: makeId(),
     checked: checkedByText.get(item.text.toLowerCase()) ?? checkedByText.get(ingredientKey(item.text)) ?? false,
   }))
+}
+
+/** Regenera la lista desde los platos y conserva tildados e ítems manuales. */
+export function mergeShopping(
+  previous: ShoppingItem[],
+  fresh: Omit<ShoppingItem, 'id'>[],
+  makeId: () => string,
+): ShoppingItem[] {
+  const manual = previous.filter((item) => item.dishId === null)
+  return [...mergeChecked(previous, fresh, makeId), ...manual]
 }
 
 function ingredientKey(text: string): string {

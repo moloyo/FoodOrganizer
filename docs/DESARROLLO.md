@@ -1,6 +1,6 @@
 # Guía de desarrollo · Comidas
 
-> Última revisión: **14 de noviembre de 2026**.
+> Última revisión: **15 de noviembre de 2026**.
 > Para el estado actual, pendientes y bitácora, ver [`ESTADO.md`](ESTADO.md).
 
 ## Retomar el proyecto en 5 minutos
@@ -32,10 +32,13 @@
 | `npm run dev` | Servidor de desarrollo en el puerto 5173. |
 | `npm run build` | Type-check (`tsc -b`) + build de producción en `dist/`. |
 | `npm run preview` | Sirve `dist/` para probar el build y la PWA. |
+| `npm test` | Corre los tests de lógica con Vitest (una vez). |
+| `npm run test:watch` | Vitest en modo interactivo durante el desarrollo. |
 | `npm run icons` | Regenera los íconos PWA en `public/icons/` (usa `sharp`). |
 | `npm install` | Instala dependencias. |
 
-No hay linter ni suite de tests automatizada en el repo (ver “Verificación manual”).
+No hay linter. La lógica pura está cubierta con Vitest; los flujos visuales se prueban a mano
+(ver “Verificación manual”).
 
 ## Modos de datos
 
@@ -79,6 +82,12 @@ Detalles importantes:
   (Site URL y Redirect URLs), si no el link de confirmación vuelve a localhost.
 - Las tablas (`dishes`, `plans`, `shopping_items`) usan `uuid`, `week_start` como `date`,
   `day` 0–6 y RLS por `auth.uid() = user_id`.
+- `schema.sql` también define `public.delete_my_account()` (`security definer`, `set
+  search_path = public`), que borra la fila de `auth.users`; las tablas públicas se limpian por
+  `on delete cascade`. Solo la puede ejecutar `authenticated`.
+- **Recuperación de contraseña:** en Supabase, agregá la URL del deploy (y `localhost:5173` para
+  probar) en **Authentication → URL Configuration → Redirect URLs**. El link vuelve a la app con
+  `type=recovery` en el hash; `recovery.ts` lo detecta y muestra la pantalla de contraseña nueva.
 - El adaptador traduce camelCase (`freezerFriendly`, `dishId`) ↔ snake_case
   (`freezer_friendly`, `dish_id`) en `src/lib/adapters/cloud.ts`.
 - Al cargar ejemplos o importar un backup, los ids que no son UUID se regeneran y se
@@ -168,6 +177,7 @@ Comidas/
 │  │  ├─ constants.ts          # Modos, colores, categorías, categorización
 │  │  ├─ date.ts               # Semanas (lunes), formatos en español
 │  │  ├─ theme.ts              # Temas: ids, persistencia y aplicación
+│  │  ├─ recovery.ts           # Detecta el link de recuperación al arrancar
 │  │  └─ useInstallPrompt.ts   # Hook de instalación PWA
 │  ├─ data/seed.ts             # 20 platos vegetarianos de ejemplo (ids UUID fijos)
 │  ├─ components/
@@ -185,9 +195,12 @@ Comidas/
 │     ├─ ShoppingScreen.tsx    # Lista de compras
 │     ├─ HistoryScreen.tsx     # Historial de semanas
 │     ├─ SettingsScreen.tsx    # Ajustes, cuenta, backup, PWA
-│     └─ AuthScreen.tsx        # Login/registro (solo modo nube)
+│     ├─ AuthScreen.tsx        # Login/registro/recuperar (solo modo nube)
+│     └─ ResetPasswordScreen.tsx # Contraseña nueva desde el link de recovery
 ├─ index.html                  # Script que aplica el tema antes del primer render
-├─ supabase/schema.sql         # Tablas + RLS para modo nube
+├─ supabase/schema.sql         # Tablas + RLS + delete_my_account()
+├─ tests/                      # Tests de Vitest (date, constants, suggest, ingredients)
+├─ vitest.config.ts            # Configuración de Vitest
 ├─ public/icons/               # Íconos PWA generados
 ├─ docs/                       # Esta guía y estado del proyecto
 └─ vite.config.ts              # Manifest y service worker
@@ -245,6 +258,8 @@ Comidas/
   (`setDayMode` usa `matchesMode`). La tarjeta avisa cuando el plato se quitó.
 - `repeatWeek` copia los días con actividad de otra semana sobre la semana visible,
   día por día. No borra los días que no estén en la semana origen.
+- **Nota del día:** `setDayNote(day, texto)` guarda el campo `note` (texto libre). Se abre
+  desde la tarjeta con un `Sheet`; no participa de sugerencias ni de compras.
 
 ### Sugerencias
 
@@ -281,14 +296,25 @@ En `src/lib/ingredients.ts` + `src/components/IngredientNameInput.tsx`:
 ### Lista de compras
 
 - Se genera **a pedido** (“Generar”/“Actualizar”) desde los platos de la semana.
-- Agrupa por `categoría | nombre | unidad` (todo en minúsculas).
-- Si todas las cantidades son numéricas, las suma; si no, las une con ` + `.
-- `mergeChecked` conserva los tildados por texto del ítem y por nombre de ingrediente
-  al regenerar.
+- Agrupa por `categoría | nombre normalizado | dimensión de unidad`. Los nombres se comparan
+  sin mayúsculas, tildes ni espacios de más.
+- **Conversión de unidades** (`UNIT_ALIASES` en `suggest.ts`):
+  - masa: `g`, `gr`, `gramo(s)`, `kg`, `kilo(s)` (base g);
+  - volumen: `ml`, `mililitro(s)`, `l`, `lt`, `litro(s)`, `cda(s)`, `cucharada(s)` (15 ml),
+    `cdta(s)`, `cucharadita(s)` (5 ml), `taza(s)` (240 ml) (base ml);
+  - cantidad: `u`, `un`, `unidad(es)`.
+  - Si todas las cantidades usan la misma unidad de cocina, se mantiene (`3 cda`, `1.5 kg`);
+    si se mezclan dimensiones compatibles, se muestra la más legible (`215 ml`, `1.5 l`).
+  - Las unidades libres (`puñado`, `lata`, vacío) se unen con ` + ` y nunca se convierten.
+- Si todas las cantidades son numéricas, se suman; si no, se listan sin repetir.
+- `mergeShopping(previous, fresh, makeId)` reemplaza lo generado por recetas y conserva:
+  - los **tildados** (por texto y por nombre de ingrediente);
+  - los **ítems manuales** (`dishId: null`), con su id y edición.
+- **Editar/borrar:** en la UI solo se muestran los botones para ítems manuales. Usan
+  `updateShoppingItem` y `deleteShoppingItem`; los generados se cambian desde la receta y
+  regenerando.
 - `shoppingOutdated` marca la lista como desactualizada cuando hay un plato planificado
   sin ítems asociados. Cambios internos de una receta no se detectan: hay que regenerar.
-- Los ítems manuales tienen `dishId: null` y sobreviven a la regeneración.
-- Hay un método `deleteShoppingItem` en los adaptadores que **todavía no se usa en la UI**.
 
 ### Rubros de compras
 
@@ -332,9 +358,19 @@ Si una palabra nueva choca con otra, recordá que gana la más larga, no la prim
 
 ### Autenticación (solo nube)
 
-- `AuthScreen` maneja ingreso y registro; si el registro requiere confirmación, muestra un aviso.
+- `AuthScreen` maneja ingreso, registro y **recuperación de contraseña** (`mode` `in | up |
+  forgot`). Si el registro requiere confirmación, muestra un aviso.
+- **Recovery:** `resetPassword(email)` llama a `supabase.auth.resetPasswordForEmail` con
+  `redirectTo` a la URL actual. El link vuelve con `type=recovery` en el hash.
+- `src/lib/recovery.ts` se evalúa antes que el cliente de Supabase y guarda la intención en
+  `sessionStorage` (`comidas:recovery`), porque auth-js puede borrar el hash al detectar la
+  sesión. `App.tsx` muestra `ResetPasswordScreen` si hay recuperación pendiente.
+- `updatePassword(password)` usa `supabase.auth.updateUser`. Al guardar o “Volver al ingreso”
+  se limpia la marca y se restaura `#/`.
+- **Eliminar cuenta:** `deleteAccount()` llama a `supabase.rpc('delete_my_account')`. La función
+  del schema borra la fila de `auth.users`; las tablas públicas caen por `on delete cascade`.
+  Si falta la función, el adaptador muestra un mensaje pidiendo ejecutar `schema.sql`.
 - Los errores comunes de Supabase se traducen al español en `cloud.ts`.
-- No hay recuperación de contraseña ni cambio de email desde la app (ver pendientes).
 
 ## Convenciones
 
@@ -393,36 +429,60 @@ Checklist: `types.ts` → `DishEditor` (form) → `DishDetail` (lectura) → map
 Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, revisá también
 `DishPickerSheet` (usa `candidatesFor`) y `DayCard` (usa `matchesMode`).
 
+## Tests
+
+`npm test` corre [Vitest](https://vitest.dev/) sobre `tests/**/*.test.ts` en entorno `node`
+(config en `vitest.config.ts`). No monta React ni navegador: prueba la lógica pura.
+
+| Archivo | Qué cubre |
+| --- | --- |
+| `tests/date.test.ts` | Semana que empieza lunes, suma/resta, rangos y etiquetas en español. |
+| `tests/constants.test.ts` | Los cuatro rubros, clasificación y palabra clave más larga. |
+| `tests/suggest.test.ts` | Dificultades, suma/conversión de unidades, tildados y manuales al regenerar. |
+| `tests/ingredients.test.ts` | Normalización, nombre canónico, catálogo y búsqueda tolerante a errores. |
+
+Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
+necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
+`src/lib` para poder testearla en `node`.
+
 ## Verificación manual
 
-No hay tests automatizados. Antes de publicar, probar en `npm run dev`:
+Antes de publicar, correr `npm test` y probar en `npm run dev`:
 
 - [ ] La semana navega adelante/atrás y recuerda la dificultad y el plato tras recargar.
 - [ ] “Sorpréndeme” completa días vacíos sin repetir platos.
 - [ ] Subir dificultad conserva el plato; bajarla lo quita si ya no entra.
+- [ ] Agregar una nota a un día, recargar y ver que sigue ahí.
 - [ ] Elegir plato, ver receta, editarla y volver a la semana.
 - [ ] Crear un plato con ingredientes; aparece en el recetario y en sugerencias.
 - [ ] En el editor, escribir “eso” y elegir “Queso” del autocompletado; al salir del campo
       “queso” debe quedar como “Queso” y guardarse así.
+- [ ] Ajustes → “Normalizar ingredientes” unifica variantes viejas y informa cuántos cambió.
 - [ ] Generar compras, tildar ítems, recargar y verificar que siguen tildados.
+- [ ] Un ingrediente repetido en dos platos (500 g + 1 kg, 200 ml + 1 cda) aparece en una sola
+      línea con la cantidad convertida.
+- [ ] Agregar un ítem manual, editarlo y borrarlo; regenerar y confirmar que el manual sigue.
 - [ ] La lista muestra solo los rubros Verdulería, Supermercado, Dietética y Otros (sin
       encabezados viejos como Frutas, Almacén o Especias).
 - [ ] Agregar “Tomate triturado”, “Arroz integral” y “Nuez moscada” como ítems manuales:
       deben caer en Supermercado, Dietética y Supermercado respectivamente.
 - [ ] En el editor de platos, el selector de rubro muestra las cuatro opciones y los platos
       viejos aparecen con un rubro válido.
-- [ ] Agregar ítem manual y regenerar la lista.
 - [ ] Copiar una semana del historial y vaciar la semana actual.
 - [ ] Exportar JSON e importarlo (probar en local; en nube tener cuidado, reemplaza todo).
 - [ ] En Ajustes, cambiar entre Clásico, Cool y Oscuro; recargar y verificar que se mantiene
       sin destello y que la barra del navegador toma el color del tema.
 - [ ] Con cada tema, recorrer las cinco pantallas y revisar contraste y desbordes.
+- [ ] En nube: “¿Olvidaste tu contraseña?” manda el email y el link abre la pantalla de
+      contraseña nueva; “Volver al ingreso” descarta el cambio.
+- [ ] En nube: “Eliminar mi cuenta” pide doble confirmación y, si falta el schema nuevo,
+      muestra el aviso correspondiente.
 - [ ] `npm run build` y `npm run preview`: la PWA se instala y funciona offline.
 - [ ] Sin errores en la consola del navegador.
 
-Sugerencia para el futuro: agregar **Vitest** para `suggest.ts`/`date.ts` y **Playwright**
-para los flujos críticos. Los scripts temporales de capturas/auditoría usados durante el
-desarrollo se eliminaron a propósito.
+Playwright para los flujos visuales sigue pendiente; por ahora esos puntos se revisan a mano.
+Los scripts temporales de capturas/auditoría usados durante el desarrollo se eliminaron a
+propósito.
 
 ## Deploy y PWA
 
@@ -449,6 +509,10 @@ desarrollo se eliminaron a propósito.
 | Cambios que no aparecen | Service worker con caché vieja: recargá o “Actualizar” en el navegador. |
 | El puerto 5173 está ocupado | Cerrá el proceso de Vite anterior o usá `--strictPort` para ver el error. |
 | Error `null value in column "note"` al guardar un día | Corregido: la app ahora manda `''`. Recargá con `Ctrl+Shift+R` para cargar el adaptador nuevo. |
+| “Falta actualizar el schema…” al eliminar la cuenta | Volvé a ejecutar `supabase/schema.sql`: define `delete_my_account()`. |
+| El link de recuperación abre la app pero no la pantalla nueva | Verificá `type=recovery` en la URL y que `src/lib/recovery.ts` se importe antes que `App` en `main.tsx`. |
 | Los ingredientes no se autocompletan | El catálogo se arma con tus platos + lista base; recargá la página para tomar la versión nueva. |
+| Un ítem manual desapareció al regenerar | Debe tener `dishId: null`; si se importó desde un backup viejo, revisá el JSON. |
 | Se ve un destello del tema claro al recargar | Revisá que el script inline de `index.html` esté antes del CSS/JS y que `comidas:theme` sea válido. |
 | La lista de compras no refleja un cambio de receta | Regenerala; la app solo detecta platos nuevos, no cambios internos. |
+| Los tests fallan por `window is not defined` | Vitest corre en `node`: mové la lógica pura a `src/lib` o agregá un entorno `jsdom` solo para ese archivo. |

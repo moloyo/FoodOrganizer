@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppProvider, useApp } from './state/AppContext'
 import { Shell, Logo } from './components/Shell'
@@ -8,6 +9,8 @@ import { ShoppingScreen } from './screens/ShoppingScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { AuthScreen } from './screens/AuthScreen'
+import { ResetPasswordScreen } from './screens/ResetPasswordScreen'
+import { clearRecovery, recoveryPending } from './lib/recovery'
 
 function Splash() {
   return (
@@ -23,8 +26,24 @@ function Splash() {
 
 function Gate() {
   const { ready, user, isCloud } = useApp()
+  const [recovering, setRecovering] = useState(recoveryPending)
+
+  function finishRecovery() {
+    clearRecovery()
+    setRecovering(false)
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}#/`,
+    )
+  }
 
   if (!ready) return <Splash />
+
+  if (isCloud && recovering) {
+    return <ResetPasswordScreen onDone={finishRecovery} onCancel={finishRecovery} />
+  }
+
   if (isCloud && !user) return <AuthScreen />
 
   return (

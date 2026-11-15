@@ -84,6 +84,18 @@ export function createLocalAdapter(): DataAdapter {
       // no-op
     },
 
+    async resetPassword() {
+      throw new Error('Estás en modo local. Configurá Supabase para recuperar contraseñas.')
+    },
+
+    async updatePassword() {
+      throw new Error('Estás en modo local. Configurá Supabase para cambiar contraseñas.')
+    },
+
+    async deleteAccount() {
+      throw new Error('Estás en modo local. No hay cuenta que eliminar.')
+    },
+
     async listDishes() {
       return read().dishes
     },

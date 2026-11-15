@@ -76,6 +76,9 @@ export interface DataAdapter {
   signIn(email: string, password: string): Promise<void>
   signUp(email: string, password: string): Promise<{ needsConfirmation: boolean }>
   signOut(): Promise<void>
+  resetPassword(email: string): Promise<void>
+  updatePassword(password: string): Promise<void>
+  deleteAccount(): Promise<void>
 
   listDishes(): Promise<Dish[]>
   saveDish(dish: Dish): Promise<Dish>
