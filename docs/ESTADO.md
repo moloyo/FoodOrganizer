@@ -15,8 +15,9 @@ modo local quedó **solo para los tests de Playwright**. Además, en nube hay **
 cola de escrituras** por usuario: sin conexión se ven los últimos datos y los cambios se
 reintentan al volver la red.
 
-Falta el deploy a Vercel, cargar la URL pública en las Redirect URLs de Supabase y probar el
-login en dos dispositivos.
+El deploy está publicado en Vercel (**<https://comidas-pi.vercel.app>**) con las variables de
+Supabase cargadas: la URL pública muestra el login y exige cuenta. Falta cargar esa URL en las
+Redirect URLs de Supabase y probar el login en dos dispositivos.
 
 ## Qué está hecho
 
@@ -214,8 +215,11 @@ login en dos dispositivos.
 
 ## Limitaciones conocidas
 
-- **Falta configurar el deploy.** Las Redirect URLs de Supabase y el login en dos dispositivos
-  necesitan una URL pública.
+- **Redirect URLs de Supabase pendientes.** El login por contraseña ya funciona en la URL
+  pública, pero la confirmación de email y el link de recuperación necesitan que
+  `https://comidas-pi.vercel.app` esté cargada en **Authentication → URL Configuration**.
+- **Falta la prueba de login en dos dispositivos.** Se verificó con dos cuentas vía API, pero no
+  con dos sesiones reales sobre el deploy.
 - **El primer uso necesita conexión.** La caché offline se llena con la primera lectura; sin red
   y sin datos guardados, la app avisa que no hay datos.
 - **La cola offline vive en el dispositivo.** Si se borran los datos del navegador antes de
@@ -261,6 +265,7 @@ login en dos dispositivos.
    - [x] registrar una segunda cuenta y verificar que cada una ve solo sus datos (RLS);
      - [x] lectura anónima vacía y rechazo de escritura con `user_id` ajeno;
      - [x] dos sesiones reales simultáneas (cuenta temporal; `delete_my_account` respondió 204);
+   - [x] configurar el deploy en Vercel con las variables de Supabase;
    - [ ] configurar Redirect URLs para el deploy;
    - [ ] probar login en dos dispositivos.
    - [x] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
@@ -468,3 +473,18 @@ login en dos dispositivos.
   ajustó el locator del ítem manual “Pan rallado” para evitar el modo estricto de Playwright).
 - **Documentación:** README, `DESARROLLO.md`, `ESTADO.md` y `.env.example` actualizados para
   cuenta obligatoria, offline y modo local solo de test.
+
+### 2026-11-15 · Deploy en Vercel
+
+- **Proyecto:** `comidas` en Vercel (`joaquin-garcias-projects-08d21ff3`), conectado al repo
+  `moloyo/FoodOrganizer`. `vercel.json` fija framework Vite, build `npm run build`, salida
+  `dist` y `Cache-Control: no-cache` para `sw.js`.
+- **Variables:** `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` cargadas en **Production** y
+  **Preview** (nunca en el repo).
+- **URL de producción:** <https://comidas-pi.vercel.app>.
+- **Verificación:** en un contexto limpio de Chrome la URL pública muestra el login (no la
+  pantalla de configuración ni datos locales), sin errores de consola. El login por
+  contraseña usa Supabase directo, así que no depende de las Redirect URLs.
+- **Pendiente:** cargar la URL en **Authentication → URL Configuration** de Supabase (Site URL
+  y Redirect URLs) para confirmación de email y recuperación de contraseña; probar el login en
+  dos dispositivos.

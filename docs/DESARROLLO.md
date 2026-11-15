@@ -559,6 +559,8 @@ propósito.
 - Después del primer deploy, agregá la URL pública en Supabase
   (**Authentication → URL Configuration**: Site URL y Redirect URLs) para confirmación de email y
   recuperación de contraseña.
+- **Deploy actual:** <https://comidas-pi.vercel.app> (proyecto `comidas`, conectado a
+  `moloyo/FoodOrganizer`). Para redesplegar: `npx vercel --prod`.
 - Para instalar la PWA hace falta **HTTPS** (o `localhost`).
 - El service worker usa `registerType: 'autoUpdate'` y precachea JS/CSS/HTML/fuentes/íconos.
   Tras un deploy, puede hacer falta recargar una vez para tomar la versión nueva.

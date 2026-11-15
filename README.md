@@ -81,6 +81,10 @@ En Vercel, importá el repo, dejá el build `npm run build` y el output `dist`, 
 `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` como variables de entorno del proyecto
 (**Production** y **Preview**). Sin ellas, la URL pública muestra la pantalla de configuración.
 
+Producción: **<https://comidas-pi.vercel.app>** (proyecto `comidas` de Vercel, conectado a
+`moloyo/FoodOrganizer`). Después de cambiar la URL o el dominio, actualizá las Redirect URLs en
+Supabase.
+
 ## Modelo de datos
 
 | Tabla | Para qué |
