@@ -258,13 +258,8 @@ export function SettingsScreen() {
   }
 
   async function handleLeaveHousehold() {
-    if (!canLeaveHousehold(household)) {
-      toast(
-        'Sos el único miembro del hogar. Abrí un link de invitación para cambiarte.',
-        'info',
-      )
-      return
-    }
+    // Guardia silenciosa: la opción no se muestra cuando es el único miembro.
+    if (!canLeaveHousehold(household)) return
     if (
       !window.confirm(
         '¿Salir del hogar? Los datos compartidos quedan en el hogar y vas a pasar a un hogar nuevo vacío.',
