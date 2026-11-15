@@ -637,9 +637,9 @@ propósito.
   (**Authentication → URL Configuration**: Site URL y Redirect URLs) para confirmación de email y
   recuperación de contraseña. Los links de invitación usan el mismo dominio (`#/unirse/<token>`),
   así que no requieren una Redirect URL extra.
-- **Antes de desplegar el código de hogares**, ejecutá `supabase/migration_hogares.sql` en el
-  SQL Editor. El cliente nuevo y el schema nuevo tienen que ir juntos: si falta la migración,
-  `my_household()` no existe; si falta el cliente, las escrituras no envían `household_id`.
+- **Migración de hogares aplicada el 15/11/2026.** `supabase/migration_hogares.sql` y el cliente
+  nuevo se desplegaron juntos. Si en el futuro se vuelve a correr `schema.sql`, hay que
+  re-correr la migración (restaura las policies viejas). Schema y cliente siempre van juntos.
 - **Deploy actual:** <https://comidas-pi.vercel.app> (proyecto `comidas`, conectado a
   `moloyo/FoodOrganizer`). Para redesplegar: `npx vercel --prod`. Es la URL canónica: Site URL
   y Redirect URLs de Supabase ya apuntan acá (`comidas-pi.vercel.app/**`); el proyecto
