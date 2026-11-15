@@ -1,4 +1,4 @@
-# Propuesta · Varias comidas por día (franjas configurables)
+# Propuesta · Varias comidas por día (catálogo por hogar, por día)
 
 > **Estado:** diseño en discusión. Rama `feature/multi-platos`, creada desde `main` (`e0d3b6b`).
 > **No se aplicó ninguna migración, no se desplegó nada y `main` sigue intacto.**
@@ -6,35 +6,41 @@
 
 ## 1. Objetivo (corregido)
 
-No se trata de "varios platos en la misma cena", sino de **varias comidas por día**: por ejemplo
-el martes una cosa al **almuerzo** y otra a la **cena**. Además, la app debe ser **adaptable**:
-otras personas (un amigo que ya la usa) no cocinan solo de noche, así que las franjas no pueden
-estar fijas en el código.
+No es "varios platos en la misma cena", sino **varias comidas por día**: el martes una cosa al
+almuerzo y otra a la cena. Y, sobre todo, ** adaptable**: otras personas (un amigo que ya usa la
+app) no cocinan solo de noche.
 
-**Principio rector:** el default sigue siendo **solo "Cena"**. Los usuarios actuales no ven
-ningún cambio hasta que agregan otra franja. Eso es lo que permite trabajar tranquilos en la
-rama sin afectar a nadie.
+Aclaración clave del usuario: **no toda la semana tiene la misma cantidad de comidas**.
+"A lo mejor en la semana solo quiero que un día tenga dos comidas y el resto una sola".
+Por eso las franjas son un **catálogo**, no una plantilla que se aplica a los 7 días.
+
+**Principio rector:** default = catálogo `["Cena"]` y **una sola comida por día**. Los usuarios
+actuales ven exactamente la misma app (mismo contador, mismas tarjetas, mismos textos) hasta
+que agregan otra comida a un día concreto.
 
 ## 2. Decisiones ya tomadas
 
 | Decisión | Respuesta |
 | --- | --- |
-| Alcance | Franjas de comida por día (almuerzo / cena / las que se configuren). |
-| Sugerencias | "Sorpréndeme" elige **1** y el resto se **agrega a mano**. |
-| Dificultad | "Por plato" (a precisar en §8: puede significar *por comida* o *sin selector*). |
+| Alcance | Franjas de comida por día, configurables por hogar. |
+| Granularidad | **Cada día tiene solo las comidas que se le agreguen** (no una plantilla semanal). |
+| Platos por comida | **Uno**. "Agregar a mano" = agregar otra comida al día o cambiar el plato. |
+| Dificultad | **Por comida**: cada almuerzo/cena tiene su propio modo y eso filtra sus sugerencias. |
+| Vista | **Agrupar por día**: una `DayCard` por día con sus comidas apiladas. |
+| Sugerencias | "Sorpréndeme" elige 1 y el resto se agrega a mano. |
 
-## 3. Modelo de datos propuesto (decisión de implementación, ya resuelta)
+## 3. Modelo de datos (decisión de implementación, ya resuelta)
 
-### `households.meals` · franjas del hogar
+### `households.meals` · catálogo de comidas del hogar
 
 Columna `jsonb not null default '[{"id":"cena","label":"Cena"}]'::jsonb`. Lista ordenada de
-franjas, compartida por todos los miembros del hogar (para que tu pareja vea lo mismo).
-Editable en **Ajustes → Comidas**: agregar, renombrar, reordenar y quitar franjas
-("Desayuno", "Almuerzo", "Merienda", "Cena", …).
+**comidas disponibles**, compartida por todos los miembros del hogar. Se edita en
+**Ajustes → Comidas**: agregar, renombrar, reordenar, archivar.
 
-- No es una tabla nueva: va en `households`, así que **no hay RLS ni policies nuevas**.
-- `id` es un slug estable (`cena`, `almuerzo`) generado al crear la franja; `label` es lo que
-  se muestra. Así renombrar no invalida los planes ya guardados.
+- `id` es un slug estable (`cena`, `almuerzo`, `desayuno`); `label` es lo que se muestra.
+  Renombrar no invalida los planes ya guardados.
+- No es una tabla nueva ⇒ **sin RLS ni policies nuevas**.
+- El catálogo **no crea filas**: solo habilita qué comidas se pueden agregar a un día.
 
 ### `plans` · una fila por (día, comida)
 
@@ -50,88 +56,82 @@ alter table public.plans
   unique (household_id, week_start, day, meal);
 ```
 
-- `dish_id` sigue siendo **escalar**: una fila = una comida = un plato (salvo que se elija la
-  variante de §5).
-- `mode` (dificultad) y `note` pasan a ser **de la comida**.
-- El `default 'cena'` hace que **no haya backfill**: las 7 filas actuales ya son cenas.
-- **Compatibilidad con la app vieja:** el cliente actual no envía `meal`, así que Postgres
-  aplica el default y sigue escribiendo/leyendo exactamente igual. No hace falta trigger ni
-  ventana de indisponibilidad: se puede aplicar la migración *antes* del deploy.
+- Un día con dos comidas = **dos filas**; un día con una = **una fila** (como hoy).
+- `dish_id` sigue escalar, `mode` y `note` pasan a ser **de la comida**.
+- **Sin backfill**: las 7 filas actuales ya son cenas por el `default 'cena'`.
+- **Compatibilidad con la app vieja:** el cliente actual no envía `meal`, Postgres aplica el
+  default y sigue funcionando igual. No hace falta trigger ni ventana de indisponibilidad; la
+  migración puede aplicarse *antes* del deploy.
 - RLS (`is_household_member(household_id)`) e índices: sin cambios.
-- Cola offline: `savePlan` sigue siendo un `upsert` por fila; solo cambia
-  `onConflict` a `household_id,week_start,day,meal`.
+- Cola offline: `savePlan` sigue siendo un `upsert` por fila; solo cambia `onConflict` a
+  `household_id,week_start,day,meal`.
 
-### Por qué no una tabla hija / por qué no `dish_ids jsonb`
+### Estructura en memoria
 
-Con el alcance corregido, la dimensión nueva es la **franja**, no la lista de platos. Agregar
-una columna `meal` con default resuelve eso con el mínimo cambio posible y sin migración de
-datos. Una tabla `meal_slots` o un array de platos sería más superficie de cambio para el mismo
-resultado (salvo que se quieran varios platos por comida, ver §5).
+```ts
+interface MealPlan { meal: string; mode: DayMode | null; dishId: string | null; note: string }
+interface DayMeals { day: number; meals: MealPlan[] }
+```
+
+`days` pasa a ser `DayMeals[]`. El orden de `meals` sigue el orden del catálogo, y solo aparecen
+las comidas que tienen fila (o que el usuario agregó) en ese día.
 
 ## 4. Consecuencias en el resto de la app
 
 | Pieza | Cambio |
 | --- | --- |
-| `DayPlan` / `PlanRow` | Suma `meal: string`. Deja de haber "7 días con un plato": ahora hay `días × franjas` filas. |
-| `AppContext.days` | Pasa a `meals` del hogar + `allPlans`; deriva una estructura `Día → Comida → Plan`. |
-| Acciones | `setDayDish(día, comida, plato)`, `addDayMeal`, `removeDayMeal`, `setMealMode`, `setMealNote`, `shuffleMeal`, `fillEmptyMeals`, `repeatWeek` (copia todas las filas). |
-| `buildShoppingItems` | Recorre **todas** las filas (día × comida). La unificación de nombres/unidades ya suma entre comidas. |
-| `shoppingOutdated` | Compara el conjunto completo de `dish_id` planificados. |
+| `AppContext.days` | `allPlans` + catálogo → `DayMeals[]`. |
+| Acciones | `setMealDish(día, comida, plato)`, `addMeal(día, comida)`, `removeMeal(día, comida)`, `setMealMode`, `setMealNote`, `shuffleMeal`, `fillEmptyMeals`, `repeatWeek` (copia todas las filas), `clearWeek`. |
+| `DayCard` | Una tarjeta por día; dentro, una fila por comida con su `ModeChips`, plato, nota y botón "+ Agregar comida". |
+| `WeekScreen` | Contador derivado de la cantidad real de comidas de la semana. Si el catálogo sigue siendo solo Cena, **mantener el texto "N de 7 cenas"** para no romper ni los tests ni la costumbre. |
+| `buildShoppingItems` | Recorre día → comida → plato. Ya unifica nombres/unidades entre comidas. |
+| `shoppingOutdated` | Compara el conjunto completo de `dish_id`. |
 | `history` | Semanas con `mode` o `dishId` en cualquier comida. |
 | `Snapshot` | `version: 2` con `plans[].meal`; `importAll` acepta v1 asumiendo `meal='cena'`. |
-| Contador | "N de 7 cenas" → "N de X comidas" (X = 7 × franjas activas). Textos y tagline a revisar. |
-| Offline | Prefijo de caché `comidas:cache:v2` (la forma de los planes cambia). |
+| Offline | Prefijo de caché `comidas:cache:v2` (cambia la forma de los planes). |
+| Tests E2E | Con el default de 1 comida por día, los 6 tests actuales deberían seguir pasando **sin cambios** si se conserva el texto "cenas". |
 
-## 5. Variante abierta: varios platos por comida
+## 5. UI
 
-La respuesta "1 + agregar a mano" puede interpretarse de dos maneras. Son de producto, no de
-implementación:
+- **Agrupado por día**: la `DayCard` actual se convierte en un contenedor; cada comida es una
+  fila con: etiqueta de la comida ("Cena" / "Almuerzo"), `ModeChips`, plato (ver / cambiar /
+  sorprender / quitar) y nota.
+- **"+ Agregar comida"** al pie de la tarjeta: abre un `Sheet` con las comidas del catálogo que
+  todavía no están en ese día (y la opción de crear una nueva, que pasa al catálogo).
+- Las comidas sin plato se muestran colapsadas para no alargar la pantalla.
+- **Ajustes → Comidas**: administrar el catálogo (agregar, renombrar, reordenar, archivar).
 
-- **5a · Una comida = un plato.** "Agregar a mano" = agregar otra comida (franja) o cambiar el
-  plato existente. Modelo de §3 sin cambios, `dish_id` escalar. **Menos riesgo.**
-- **5b · Una comida puede tener varios platos** (principal + acompañamiento). "Sorpréndeme"
-  elige 1 y el usuario suma el resto. Requiere además `dish_ids jsonb` en la fila (o tabla hija),
-  y que la dificultad se evalúe por plato. **Más potente, más cambios.**
+## 6. Riesgos y decisiones de detalle
 
-## 6. UI (a decidir en §8)
-
-Con 2 franjas × 7 días hay hasta 14 tarjetas. Opciones:
-
-- **Agrupar por día**: una `DayCard` por día con las comidas apiladas, las vacías colapsadas.
-  Mantiene la navegación semanal actual y no alarga la pantalla.
-- **Una tarjeta por comida**: más simple de implementar, pero la semana se vuelve larguísima.
-- **Pestañas por franja** (Almuerzo / Cena): cambia la metáfora de "semana" a "franja".
-
-La dificultad, si es por comida, pasa a los `ModeChips` de cada fila; si se elimina, desaparece
-el selector y "Sorpréndeme" usa solo la dificultad propia de cada plato del recetario.
-
-## 7. Riesgos
-
-- **Densidad en 390 px**: 14–21 filas pueden cansar. Mitigación: colapsar comidas vacías.
-- **Textos**: "Solo cenas", "N de 7 cenas", "cena" en sugerencias y notas. Hay que
-  parametrizarlos, no solo traducirlos.
-- **Edición simultánea en el hogar**: sigue siendo `upsert` de la fila; dos personas editando
-  la misma comida se pisan (igual que hoy con `replaceShopping`). Aceptable para el MVP.
-- **Borrar una franja** que tiene planes: decidir si se borran esos planes o se migra a "Cena".
+- **Densidad**: se resuelve sola porque cada día muestra solo sus comidas; igual, colapsar las
+  vacías.
+- **Textos**: "Solo cenas", "N de 7 cenas", "cena" en sugerencias. Parametrizar, pero conservar
+  el wording actual mientras el catálogo sea solo Cena.
+- **Quitar/archivar una comida del catálogo**: si tiene planes en semanas pasadas, no se debe
+  borrar (rompería el historial). Propuesta: **archivar** (`archived: true`), dejar de ofrecerla
+  para nuevos días y seguir mostrándola en los planes existentes.
+- **Borrar el día / vaciar semana**: borra todas las filas del día/semana, como hoy.
+- **Edición simultánea en el hogar**: sigue siendo `upsert` de la fila; dos personas editando la
+  misma comida se pisan (igual que hoy con `replaceShopping`). Aceptable para el MVP.
 - **Backups v1**: `importAll` debe seguir aceptándolos.
 
-## 8. Decisiones pendientes (de producto)
+## 7. Decisiones pendientes (de producto)
 
-1. ¿Franjas **configurables por hogar** (default solo Cena) o fijas "Almuerzo + Cena"?
-2. ¿Una comida = **un plato** (5a) o **varios platos** (5b)?
-3. ¿El selector de dificultad va **por comida**, **por día**, o **se elimina** y cada plato usa
-   la dificultad del recetario? (la respuesta "por plato" necesita precisarse).
-4. ¿La nota es **del día** o **de cada comida**?
-5. ¿Cómo se muestra la semana con varias franjas (agrupar por día / tarjeta por comida /
-   pestañas)?
+1. ¿El catálogo es **reutilizable** (agregás "Almuerzo" una vez y lo podés sumar a cualquier día
+   con un toque) o cada día permite **texto libre**? → recomendable: catálogo reutilizable, con
+   la opción de crear una comida nueva desde el propio día.
+2. ¿"Sorpréndeme" de semana llena **todas las comidas vacías** de todos los días, o solo la
+   **Cena** de cada día?
+3. Al quitar una comida del catálogo, ¿**archivar** (conserva planes e historial) o **borrar**
+   también sus planes? → recomendable: archivar.
 
-## 9. Plan de trabajo en la rama
+## 8. Plan de trabajo en la rama
 
-1. Cerrar §8 y actualizar este documento.
+1. Cerrar §7 y actualizar este documento.
 2. Tipos + lógica pura + tests (sin tocar Supabase ni la UI).
-3. Migración SQL + adaptador (cloud / local / offline) + configuración de franjas.
+3. Migración SQL + adaptador (cloud / local / offline) + catálogo en `households`.
 4. UI: `DayCard`, `WeekScreen`, `HistoryScreen`, Ajustes → Comidas.
-5. Verificación local: `npm test`, `npm run test:e2e` (con default de 1 franja, los tests
-   actuales deben seguir pasando **sin cambios**), `npm run build`.
+5. Verificación local: `npm test`, `npm run test:e2e` (los 6 tests deben seguir pasando),
+   `npm run build`.
 6. Verificación real con dos cuentas temporales en un **deploy de preview**, sin tocar `main`.
 7. Recién ahí: merge a `main`, aplicar migración y desplegar.
