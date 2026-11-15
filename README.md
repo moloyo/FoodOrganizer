@@ -10,9 +10,9 @@ Pensada mobile-first, en español, para cocina vegetariana.
 - [`docs/ESTADO.md`](docs/ESTADO.md): qué está hecho, decisiones, limitaciones, pendientes y
   bitácora de cambios. **Empezá por acá si retomás el proyecto.**
 
-> Estado actual: funcional en modo local y conectado a un proyecto real de Supabase. La lógica
-> está cubierta con tests (Vitest) y falta completar la prueba de escritura/registro con una
-> cuenta real.
+> Estado actual: funcional en modo local y probado de punta a punta contra Supabase (login,
+> escrituras, persistencia y RLS). La lógica está cubierta con tests (Vitest); falta el deploy
+> y la prueba con una segunda cuenta.
 
 ## Qué hace
 

@@ -25,7 +25,7 @@ function Splash() {
 }
 
 function Gate() {
-  const { ready, user, isCloud } = useApp()
+  const { ready, loaded, user, isCloud } = useApp()
   const [recovering, setRecovering] = useState(recoveryPending)
 
   function finishRecovery() {
@@ -45,6 +45,9 @@ function Gate() {
   }
 
   if (isCloud && !user) return <AuthScreen />
+
+  // Evita mostrar estados vacíos ("recetario vacío") mientras llegan los datos de la nube.
+  if (!loaded) return <Splash />
 
   return (
     <HashRouter>

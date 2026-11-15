@@ -9,9 +9,10 @@ La app está **funcional en modo local** y lista para probarse en el celular. Pe
 las cenas de la semana según la dificultad del día, elegir platos del recetario, generar la
 lista de compras, consultar el historial y funcionar como PWA instalable.
 
-El **modo nube está conectado a un proyecto real de Supabase**: se verificaron las tablas, RLS y el
-endpoint de autenticación. Falta probar el registro y las escrituras de punta a punta con una
-cuenta real.
+El **modo nube está conectado y probado de punta a punta** contra un proyecto real de Supabase:
+se verificaron login, escrituras (plato, plan, nota y compras), persistencia tras recargar y RLS
+(lectura anónima vacía y escritura con `user_id` ajeno rechazada). Falta la prueba con una
+segunda cuenta y el deploy.
 
 ## Qué está hecho
 
@@ -151,9 +152,8 @@ cuenta real.
   unidades, unificación de nombres, preservación de tildados/manuales y búsqueda tolerante a
   errores de tipeo.
 - **Git (15/11/2026):** repositorio inicializado, `.gitignore` revisado y primer commit
-  `c4ed472` con las 50 archivos de la primera versión. El remoto configurado es
-  `git@github.com:moloyo/FoodOrganizer.git`; al momento de esta revisión el remoto estaba
-  vacío, así que no había nada para traer.
+  `c4ed472` con los 50 archivos de la primera versión. El remoto
+  `git@github.com:moloyo/FoodOrganizer.git` estaba vacío; el 15/11 se publicó `main`.
 - **Nota del día (15/11/2026):** probada en un build local (`dist-test`): se guarda, aparece en
   la tarjeta y sobrevive a la recarga.
 - **Compras (15/11/2026):** probado en build local: un “Sorpréndeme” completo generó 26 ítems
@@ -165,14 +165,26 @@ cuenta real.
 - **Recuperación de contraseña (15/11/2026):** en modo nube, “¿Olvidaste tu contraseña?” muestra
   solo el email y “Mandar link”; un link con `type=recovery` abre la pantalla de contraseña
   nueva incluso si el hash se limpia; “Volver al ingreso” descarta el cambio y limpia la marca.
+- **Supabase de punta a punta (15/11/2026):** con una cuenta real se creó un plato, se planificó
+  un día en la semana siguiente, se guardó una nota, se generó la lista (“Tomate · 2 u”) y se
+  tildó un ítem. Tras recargar, plato, plan, nota y tildado seguían ahí.
+- **RLS (15/11/2026):** la lectura anónima de `dishes`, `plans` y `shopping_items` devuelve `[]`.
+  Con el JWT del usuario, las tres tablas devolvieron solo filas propias (0 ajenas) y un `insert`
+  con `user_id` forjado fue rechazado con `403` / `42501`.
+- **Datos de prueba:** se borraron el plato, el plan y la compra de prueba; la cuenta quedó con
+  21 platos, 7 planes y 32 ítems, como estaba antes.
+- **Carga inicial (15/11/2026):** se corrigió un destello del estado “Tu recetario está vacío”
+  mientras llegaban los datos de la nube: ahora se muestra el splash hasta que termina la
+  primera carga.
 - **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
   queda en ~625 kB (aviso de tamaño, no bloqueante).
 
 ## Limitaciones conocidas
 
-- **Modo nube conectado, pero falta la prueba completa.** El schema, las tablas, RLS y el
-  endpoint de auth ya se verificaron; falta registrarse, crear platos/menús y confirmar la
-  sincronización entre dispositivos.
+- **Falta la prueba con una segunda cuenta.** La RLS se verificó por lectura anónima y por el
+  rechazo de escrituras con `user_id` ajeno, pero no con dos sesiones reales simultáneas.
+- **Falta configurar el deploy.** Las Redirect URLs de Supabase y el login en dos dispositivos
+  necesitan una URL pública.
 - **No hay tests de interfaz.** La lógica pura está cubierta con Vitest, pero los flujos
   visuales (semana, modales, PWA) se verifican a mano; no hay Playwright ni linter.
 - **La lista no detecta cambios internos de una receta.** Solo marca “desactualizada” cuando
@@ -185,6 +197,8 @@ cuenta real.
   `delete_my_account()`, la app muestra un aviso para ejecutar `supabase/schema.sql`.
 - **En modo nube no hay cola offline.** Sin red, las acciones fallan con un toast.
 - **Importar en nube borra todo antes de insertar y no es transaccional.**
+- **La semana visible vuelve a la actual al recargar.** El plan y la lista se guardan, pero la
+  navegación de semanas no se persiste.
 - **No hay sincronización en tiempo real.** Otro dispositivo ve los cambios al recargar.
 - **La normalización de ingredientes es manual.** El autocompletado corrige al crear/editar y
   “Normalizar ingredientes” recorre todo el recetario, pero no se ejecuta sola.
@@ -203,16 +217,18 @@ cuenta real.
 
 1. **Git local listo.** Repositorio inicializado, `.gitignore` y primer commit `c4ed472`.
    - [x] `git init` + commit inicial.
-   - [ ] Publicar el historial en el remoto (`git@github.com:moloyo/FoodOrganizer.git`); al
-     revisar, el remoto estaba vacío. Definir si se hace `push` de `main`.
+   - [x] Publicar el historial en el remoto (`git@github.com:moloyo/FoodOrganizer.git`);
+     `main` quedó en `28e9505`.
 2. **Terminar de probar Supabase de punta a punta** con el proyecto real:
    - [x] ejecutar `supabase/schema.sql`;
    - [x] cargar las variables en `.env.local`;
-   - [ ] registrar una cuenta y probar escrituras (crear plato, planificar, compras);
+   - [x] registrar una cuenta y probar escrituras (crear plato, planificar, compras);
    - [ ] registrar una segunda cuenta y verificar que cada una ve solo sus datos (RLS);
+     - [x] lectura anónima vacía y rechazo de escritura con `user_id` ajeno;
+     - [ ] dos sesiones reales simultáneas.
    - [ ] configurar Redirect URLs para el deploy;
    - [ ] probar login en dos dispositivos.
-   - [ ] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
+   - [x] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
 3. **Reemplazar los platos de ejemplo por recetas reales** (o crear las propias y borrar los ejemplos).
 
 ### P1 · Próximas mejoras
@@ -363,6 +379,22 @@ cuenta real.
 - **`recovery.ts`:** detecta `type=recovery` en el primer arranque y lo guarda en
   `sessionStorage`, porque Supabase puede limpiar el hash antes de montar React.
 - **Git:** commit inicial `c4ed472`; se configuró el remoto `moloyo/FoodOrganizer`. La clave
-  `~/.ssh/id_public` autentica como `moloyo`; el remoto todavía está vacío.
+  `~/.ssh/id_public` autentica como `moloyo` y `main` se publicó el 15/11 (`28e9505`).
 - Verificación: `npm test` (22/22), `npm run build` correcto, y prueba manual en build local de
   nota, alta/edición/borrado de manuales, regeneración, normalización y recuperación.
+
+### 2026-11-15 · Supabase real de punta a punta
+
+- **Push:** `main` se publicó en `origin/main` (`28e9505`) con la clave `~/.ssh/id_public`.
+- **Prueba con cuenta real:** se creó el plato “Plato de prueba E2E”, se planificó el lunes de la
+  semana siguiente, se guardó la nota “Nota E2E nube”, se generó la compra (“Tomate · 2 u”) y se
+  tildó. Tras recargar, todo seguía igual (plato, plan, nota y tildado).
+- **RLS:** la lectura anónima devuelve `[]`; con el JWT del usuario, `dishes`, `plans` y
+  `shopping_items` devolvieron 22/8/33 filas, todas propias (0 ajenas). Un `insert` con
+  `user_id` ajeno fue rechazado con `403` y código `42501`.
+- **Limpieza:** se borraron por id la fila de prueba de `plans`, la de `shopping_items` y el
+  plato; la cuenta volvió a 21 platos, 7 planes y 32 ítems.
+- **Carga inicial:** `AppContext` ahora expone `loaded` y `Gate` muestra el splash hasta que
+  terminan de llegar platos y planes; se evita el falso “Tu recetario está vacío” al entrar.
+- **Pendiente de P0.2:** segunda cuenta real, Redirect URLs del deploy y login en dos
+  dispositivos.

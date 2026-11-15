@@ -42,6 +42,8 @@ export interface Toast {
 
 interface AppContextValue {
   ready: boolean
+  /** Los datos iniciales (platos y planes) ya se cargaron al menos una vez. */
+  loaded: boolean
   busy: boolean
   user: SessionUser | null
   isCloud: boolean
@@ -95,6 +97,7 @@ function emptyDay(day: number): DayPlan {
 export function AppProvider({ children }: { children: ReactNode }) {
   const adapter = useMemo(() => getAdapter(), [])
   const [ready, setReady] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [weekStart, setWeekStart] = useState(currentWeekStart)
@@ -162,16 +165,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAllPlans([])
       setHistory([])
       setShopping([])
+      setLoaded(true)
       return
     }
     let alive = true
     setBusy(true)
+    setLoaded(false)
     reloadAll()
       .catch((error: unknown) => {
         toast(error instanceof Error ? error.message : 'No pudimos cargar tus datos.', 'error')
       })
       .finally(() => {
-        if (alive) setBusy(false)
+        if (alive) {
+          setBusy(false)
+          setLoaded(true)
+        }
       })
     return () => {
       alive = false
@@ -620,6 +628,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value: AppContextValue = {
     ready,
+    loaded,
     busy,
     user,
     isCloud: cloudConfigured,
