@@ -3,11 +3,15 @@ import { NavLink } from 'react-router-dom'
 import {
   BookOpen,
   CalendarDays,
+  CloudUpload,
   History,
+  RefreshCw,
   Settings,
   ShoppingBasket,
+  WifiOff,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { useApp } from '../state/AppContext'
 
 export function Logo({ size = 38 }: { size?: number }) {
   return (
@@ -43,10 +47,52 @@ const TABS = [
   { to: '/ajustes', label: 'Ajustes', icon: Settings },
 ]
 
+function OfflineBanner() {
+  const { offlineStatus, retrySync } = useApp()
+  const { online, pending, syncing } = offlineStatus
+
+  if (online && pending === 0 && !syncing) return null
+
+  const changes = `${pending} cambio${pending === 1 ? '' : 's'}`
+  const label = !online
+    ? pending > 0
+      ? `Sin conexión · ${changes} se sincroniza${pending === 1 ? '' : 'n'} al volver`
+      : 'Sin conexión · mostrando los últimos datos guardados'
+    : syncing
+      ? 'Sincronizando cambios pendientes…'
+      : `${changes} pendiente${pending === 1 ? '' : 's'} de sincronizar`
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mb-3 flex items-center gap-2 rounded-xl border border-accent/30 bg-accent-soft/60 px-3 py-2 text-[11.5px] font-medium text-ink"
+    >
+      {online ? (
+        <CloudUpload className={clsx('size-4 shrink-0 text-accent', syncing && 'animate-pulse')} />
+      ) : (
+        <WifiOff className="size-4 shrink-0 text-accent" />
+      )}
+      <span className="min-w-0 flex-1">{label}</span>
+      {online && pending > 0 && !syncing && (
+        <button
+          type="button"
+          onClick={retrySync}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand-soft"
+        >
+          <RefreshCw className="size-3" />
+          Reintentar
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[560px] flex-col">
       <main className="flex-1 px-4 pb-32 pt-[max(1.25rem,env(safe-area-inset-top))]">
+        <OfflineBanner />
         {children}
       </main>
 

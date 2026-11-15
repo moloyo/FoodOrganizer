@@ -10,9 +10,10 @@ Pensada mobile-first, en español, para cocina vegetariana.
 - [`docs/ESTADO.md`](docs/ESTADO.md): qué está hecho, decisiones, limitaciones, pendientes y
   bitácora de cambios. **Empezá por acá si retomás el proyecto.**
 
-> Estado actual: funcional en modo local y probado de punta a punta contra Supabase (login,
-> escrituras, persistencia y RLS). La lógica está cubierta con tests (Vitest); falta el deploy
-> y la prueba con una segunda cuenta.
+> Estado actual: la app funciona **con cuenta obligatoria** contra Supabase, con caché de
+> lectura y cola de escrituras para seguir usándola sin conexión. Login, escrituras,
+> persistencia y RLS están probados de punta a punta; falta el deploy y la prueba de login
+> en dos dispositivos.
 
 ## Qué hace
 
@@ -22,21 +23,24 @@ Pensada mobile-first, en español, para cocina vegetariana.
 - **Compras**: arma la lista de la semana agrupada en Verdulería, Supermercado, Dietética y Otros, suma cantidades compatibles (500 g + 1 kg → 1.5 kg), conserva lo tildado y deja editar o borrar los ítems manuales.
 - **Historial**: guarda las semanas planificadas para consultarlas o repetirlas.
 - **Temas**: clásico, cool y oscuro, se eligen en Ajustes y se recuerdan en cada dispositivo.
-- **Cuenta (nube)**: ingreso, registro, recuperación de contraseña y eliminación de cuenta.
+- **Cuenta obligatoria (nube)**: ingreso, registro, recuperación de contraseña y eliminación de cuenta. Sin sesión no se accede a los datos.
+- **Offline (nube)**: con la app ya abierta, sin conexión se usan los últimos datos guardados y los cambios se encolan; al volver la red se sincronizan solos.
 - **PWA**: se instala en el celular, funciona sin conexión y se abre como app.
 
 ## Stack
 
-React 19 · TypeScript · Vite · Tailwind CSS v4 · Supabase (opcional) · vite-plugin-pwa
+React 19 · TypeScript · Vite · Tailwind CSS v4 · Supabase · vite-plugin-pwa
 
-## Modo local y modo nube
+## Cuenta y sincronización
 
-La app detecta si hay credenciales de Supabase:
+La app **siempre funciona con cuenta**: el menú, los platos y las compras viven en Supabase y
+se sincronizan entre dispositivos. Si faltan las variables de entorno, la app muestra una
+pantalla de “Falta configurar Supabase” en lugar de abrir un modo local.
 
-- **Sin credenciales** → modo local. Los datos quedan en `localStorage` de ese dispositivo. Ideal para probar.
-- **Con credenciales** → modo nube. Cuenta con email/contraseña y datos sincronizados entre dispositivos.
+> El modo local existe solo para los tests de Playwright (`--mode e2e` + `VITE_E2E_LOCAL=1`).
+> Una build de producción ignora esa variable, así que ningún usuario puede saltearse el login.
 
-### Configurar Supabase (para sincronizar)
+### Configurar Supabase
 
 1. Creá un proyecto gratis en [supabase.com](https://supabase.com).
 2. Abrí **SQL Editor** y ejecutá completo [`supabase/schema.sql`](supabase/schema.sql).
@@ -73,7 +77,9 @@ Es un sitio estático. Cualquier hosting sirve (Vercel, Netlify, Cloudflare Page
 - Publish dir: `dist`
 
 La app usa `HashRouter`, así que no hacen falta reglas de rewrite. Para instalar la PWA hace falta HTTPS.
-Si usás Vercel/Netlify, cargá `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` como variables de entorno del proyecto.
+En Vercel, importá el repo, dejá el build `npm run build` y el output `dist`, y cargá
+`VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` como variables de entorno del proyecto
+(**Production** y **Preview**). Sin ellas, la URL pública muestra la pantalla de configuración.
 
 ## Modelo de datos
 

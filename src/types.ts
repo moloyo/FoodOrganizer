@@ -69,8 +69,28 @@ export interface SessionUser {
 
 export type AdapterKind = 'local' | 'cloud'
 
+export interface OfflineStatus {
+  /** Hay red según el navegador (navigator.onLine). */
+  online: boolean
+  /** Escrituras guardadas localmente que todavía no llegaron al servidor. */
+  pending: number
+  /** Se está reintentando la cola. */
+  syncing: boolean
+  /** Último error al sincronizar un cambio (para avisar sin perder datos). */
+  lastError: { message: string; at: number } | null
+}
+
+export interface OfflineSupport {
+  getStatus(): OfflineStatus
+  subscribe(cb: (status: OfflineStatus) => void): () => void
+  /** Reintenta la cola si hay red. No hace nada si ya está sincronizando. */
+  flush(): Promise<void>
+}
+
 export interface DataAdapter {
   kind: AdapterKind
+  /** Solo en adaptadores con caché y cola offline. */
+  offline?: OfflineSupport
   getUser(): Promise<SessionUser | null>
   onAuthChange(cb: (user: SessionUser | null) => void): () => void
   signIn(email: string, password: string): Promise<void>

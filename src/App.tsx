@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppProvider, useApp } from './state/AppContext'
+import { appConfigured } from './lib/adapters'
 import { Shell, Logo } from './components/Shell'
 import { Toaster } from './components/ui'
 import { WeekScreen } from './screens/WeekScreen'
@@ -20,6 +21,36 @@ function Splash() {
       </div>
       <p className="font-display text-[22px] font-semibold text-ink">Comidas</p>
       <p className="text-[12px] text-muted">Preparando la semana…</p>
+    </div>
+  )
+}
+
+function ConfigMissing() {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center px-5 py-10">
+      <div className="w-full max-w-sm text-center">
+        <Logo size={56} />
+        <h1 className="mt-4 font-display text-[28px] font-semibold leading-tight tracking-tight text-ink">
+          Falta configurar Supabase
+        </h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-muted">
+          Comidas funciona con cuenta: el menú, los platos y las compras se guardan en tu
+          cuenta y se sincronizan entre dispositivos.
+        </p>
+        <div className="card mt-6 p-4 text-left">
+          <p className="text-[12px] font-semibold text-ink">Para levantarla en desarrollo:</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-[11.5px] leading-relaxed text-muted">
+            <li>
+              Copiá <code>.env.example</code> a <code>.env.local</code>.
+            </li>
+            <li>
+              Completá <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code>.
+            </li>
+            <li>Ejecutá <code>supabase/schema.sql</code> en el SQL Editor de Supabase.</li>
+            <li>Reiniciá el servidor de desarrollo y creá tu cuenta.</li>
+          </ol>
+        </div>
+      </div>
     </div>
   )
 }
@@ -66,6 +97,8 @@ function Gate() {
 }
 
 export default function App() {
+  if (!appConfigured) return <ConfigMissing />
+
   return (
     <AppProvider>
       <Gate />

@@ -5,14 +5,18 @@
 
 ## Resumen
 
-La app está **funcional en modo local** y lista para probarse en el celular. Permite planificar
-las cenas de la semana según la dificultad del día, elegir platos del recetario, generar la
-lista de compras, consultar el historial y funcionar como PWA instalable.
+La app está **funcional y probada de punta a punta** contra un proyecto real de Supabase.
+Permite planificar las cenas de la semana según la dificultad del día, elegir platos del
+recetario, generar la lista de compras, consultar el historial y funcionar como PWA instalable.
 
-El **modo nube está conectado y probado de punta a punta** contra un proyecto real de Supabase:
-se verificaron login, escrituras (plato, plan, nota y compras), persistencia tras recargar y RLS
-(lectura anónima vacía y escritura con `user_id` ajeno rechazada). Falta la prueba con una
-segunda cuenta y el deploy.
+**Todos los usuarios necesitan una cuenta**: la app pide login siempre y los datos se
+sincronizan en la nube. Sin credenciales de Supabase muestra una pantalla de configuración; el
+modo local quedó **solo para los tests de Playwright**. Además, en nube hay **caché de lectura y
+cola de escrituras** por usuario: sin conexión se ven los últimos datos y los cambios se
+reintentan al volver la red.
+
+Falta el deploy a Vercel, cargar la URL pública en las Redirect URLs de Supabase y probar el
+login en dos dispositivos.
 
 ## Qué está hecho
 
@@ -62,10 +66,10 @@ segunda cuenta y el deploy.
 
 - **Tema de la interfaz:** clásico (cálido), cool (azul) y oscuro, con vista previa.
   Se aplica al instante y queda guardado en este dispositivo.
-- Modo local/nube y cuenta (ingresar, crear cuenta, salir).
+- Cuenta y sesión (ingresar, crear cuenta, salir). **La cuenta es obligatoria** para usar la app.
 - **Recuperación de contraseña:** “¿Olvidaste tu contraseña?” manda un link por email y abre una
   pantalla para elegir la nueva. También “Volver al ingreso” para descartar el cambio.
-- **Eliminar la cuenta** (solo en nube, con doble confirmación): borra la cuenta de Supabase y,
+- **Eliminar la cuenta** (con doble confirmación): borra la cuenta de Supabase y,
   por las claves foráneas en cascada, todos sus platos, planes y compras.
 - Instalar PWA (con instructivo para iOS).
 - Exportar/importar backup JSON.
@@ -77,10 +81,22 @@ segunda cuenta y el deploy.
 
 ### Base técnica
 
-- Adaptador de datos abstracto con implementaciones local (`localStorage`) y nube (Supabase).
+- Adaptador de datos abstracto con implementación de nube (Supabase) envuelta por un adaptador
+  offline; el local (`localStorage`) queda solo para los tests de Playwright.
+- **Caché de lectura por usuario** en `localStorage` (`comidas:cache:v1:<userId>:dishes|plans|shopping`):
+  si una lectura falla por red, se muestran los últimos datos guardados.
+- **Cola de escrituras por usuario** (`comidas:queue:v1:<userId>`): las escrituras que fallan
+  por red se guardan y se reintentan al volver la conexión o al abrir la app. La UI muestra
+  “Sin conexión” y la cantidad de cambios pendientes, con un botón “Reintentar”.
+- Los errores que no son de red (RLS, validación) no se encolan: se muestran y se descarta solo
+  esa operación.
+- **Cuenta obligatoria:** sin variables de Supabase la app muestra “Falta configurar Supabase”;
+  `VITE_E2E_LOCAL=1` solo tiene efecto junto con `--mode e2e`.
 - `supabase/schema.sql` con tablas, índices, RLS y la función `delete_my_account()`.
 - PWA con manifest, íconos, service worker y precache.
-- **Tests con Vitest** para fechas, rubros, sugerencias, unidades de compras e ingredientes.
+- **Tests con Vitest** para fechas, rubros, sugerencias, unidades de compras e ingredientes,
+  más el modo de la app y el adaptador offline.
+- **Tests de interfaz con Playwright** (5 flujos críticos).
 - Repositorio git inicializado con historial (`main`).
 - README en español con setup y deploy.
 - Responsive mobile-first; sin desbordes horizontales a 390 px.
@@ -91,9 +107,12 @@ segunda cuenta y el deploy.
 | --- | --- |
 | React + Vite + TypeScript | Stack simple, rápido y fácil de desplegar como sitio estático. |
 | Tailwind v4 con tokens en `index.css` | Menos configuración y estilos consistentes con la identidad visual. |
-| Modo local por defecto | Permite usar la app sin cuenta ni backend; ideal para empezar. |
-| Supabase opcional | Cuenta y sincronización sin mantener un servidor propio. |
+| Cuenta obligatoria en Supabase | Los datos se sincronizan entre dispositivos y no quedan atados a un navegador; evita un modo local que confunda a usuarios reales. |
+| Modo local solo en tests (`--mode e2e` + `VITE_E2E_LOCAL=1`) | Playwright necesita un backend efímero, pero una build de producción nunca debe poder saltearse el login. |
 | `DataAdapter` | La UI no sabe si los datos son locales o remotos; se puede cambiar la persistencia. |
+| Adaptador offline que envuelve al de nube | Mantiene la lógica de Supabase intacta: la caché y la cola son una capa aparte y testeable. |
+| Caché y cola por usuario en `localStorage` | Evita mezclar datos entre cuentas en un mismo dispositivo y sobrevive a recargas. |
+| Encolar solo errores de red | Un error de RLS o validación no se arregla reintentando; se muestra y se descarta esa operación. |
 | Semana empieza lunes | Convención local y del público objetivo. |
 | `weekStart` ISO (`yyyy-MM-dd`) | Simple de ordenar, comparar y guardar como `date` en Supabase. |
 | Dificultad incluye `freezer` | Resuelve los días sin tiempo para cocinar. |
@@ -119,7 +138,7 @@ segunda cuenta y el deploy.
 
 - `npm run build` compila sin errores (TypeScript + Vite + PWA).
 - Build con service worker: 25 archivos precacheados.
-- Modo local: persistencia tras recargar; alta de platos; dificultad; sugerencias.
+- Modo local de test: persistencia tras recargar; alta de platos; dificultad; sugerencias.
 - Semana completa con “Sorpréndeme”.
 - Subir dificultad conserva el plato y bajarla lo quita cuando corresponde
   (probado en navegador el 13/11/2026).
@@ -147,10 +166,11 @@ segunda cuenta y el deploy.
   nuevo correspondiente; en el editor de platos también se normalizan al abrir y al guardar.
   Sin errores de consola.
 - Sin errores de página/consola en las pruebas realizadas.
-- **Tests automatizados (15/11/2026):** `npm test` corre 22 tests en 4 archivos
-  (`date`, `constants`, `suggest`, `ingredients`) y pasan todos. Incluyen conversión de
-  unidades, unificación de nombres, preservación de tildados/manuales y búsqueda tolerante a
-  errores de tipeo.
+- **Tests automatizados (15/11/2026):** `npm test` corre **36 tests en 6 archivos**:
+  `date`, `constants`, `suggest`, `ingredients`, `appMode` y `offline`. Cubren conversión de
+  unidades, unificación de nombres, preservación de tildados/manuales, búsqueda tolerante a
+  errores de tipeo, cuenta obligatoria/modo de test, caché de lectura, cola de escrituras por
+  usuario, compactación y descarte de errores que no son de red.
 - **Git (15/11/2026):** repositorio inicializado, `.gitignore` revisado y primer commit
   `c4ed472` con los 50 archivos de la primera versión. El remoto
   `git@github.com:moloyo/FoodOrganizer.git` estaba vacío; el 15/11 se publicó `main`.
@@ -181,14 +201,27 @@ segunda cuenta y el deploy.
   dificultad, alta de plato con “eso” → “Queso”, compras con tildado e ítem manual, y temas.
   El modo `e2e` usa `tests/e2e/env` como `envDir` y no toca el `.env.local` real.
 - **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
-  queda en ~625 kB (aviso de tamaño, no bloqueante).
+  queda en ~638 kB (aviso de tamaño, no bloqueante).
+- **Cuenta obligatoria (15/11/2026):** sin credenciales de Supabase la app muestra “Falta
+  configurar Supabase” (no hay modo local para usuarios). `resolveAppMode` solo acepta
+  `e2e-local` con `--mode e2e` **y** `VITE_E2E_LOCAL=1`; los tests cubren los tres casos.
+- **RLS con segunda cuenta (15/11/2026):** una cuenta temporal creada para la prueba vio solo su
+  propio plato, la cuenta principal no lo vio, `delete_my_account` respondió 204, el token
+  temporal dejó de servir (403) y los datos de la cuenta principal quedaron intactos.
+- **Offline (15/11/2026):** los 11 tests del adaptador cubren caché de platos/compras por semana,
+  no inventar listas vacías, encolar planes, compactar escrituras repetidas, separar la cola por
+  usuario, no encolar errores de RLS y cargar ejemplos sin red con ids UUID.
 
 ## Limitaciones conocidas
 
-- **Falta la prueba con una segunda cuenta.** La RLS se verificó por lectura anónima y por el
-  rechazo de escrituras con `user_id` ajeno, pero no con dos sesiones reales simultáneas.
 - **Falta configurar el deploy.** Las Redirect URLs de Supabase y el login en dos dispositivos
   necesitan una URL pública.
+- **El primer uso necesita conexión.** La caché offline se llena con la primera lectura; sin red
+  y sin datos guardados, la app avisa que no hay datos.
+- **La cola offline vive en el dispositivo.** Si se borran los datos del navegador antes de
+  sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conflictos: la
+  última escritura que llega gana.
+- **No hay sincronización en tiempo real.** Otro dispositivo ve los cambios al recargar.
 - **No hay linter.** La lógica pura está cubierta con Vitest y los flujos críticos con
   Playwright; la PWA, el modo nube y los detalles visuales se siguen revisando a mano.
 - **La lista no detecta cambios internos de una receta.** Solo marca “desactualizada” cuando
@@ -199,11 +232,9 @@ segunda cuenta y el deploy.
   ya están).
 - **El borrado de cuenta necesita el schema actualizado.** Si el proyecto no tiene la función
   `delete_my_account()`, la app muestra un aviso para ejecutar `supabase/schema.sql`.
-- **En modo nube no hay cola offline.** Sin red, las acciones fallan con un toast.
 - **Importar en nube borra todo antes de insertar y no es transaccional.**
 - **La semana visible vuelve a la actual al recargar.** El plan y la lista se guardan, pero la
   navegación de semanas no se persiste.
-- **No hay sincronización en tiempo real.** Otro dispositivo ve los cambios al recargar.
 - **La normalización de ingredientes es manual.** El autocompletado corrige al crear/editar y
   “Normalizar ingredientes” recorre todo el recetario, pero no se ejecuta sola.
 - **El tema es por dispositivo.** No se guarda en la cuenta ni se sincroniza entre equipos.
@@ -227,9 +258,9 @@ segunda cuenta y el deploy.
    - [x] ejecutar `supabase/schema.sql`;
    - [x] cargar las variables en `.env.local`;
    - [x] registrar una cuenta y probar escrituras (crear plato, planificar, compras);
-   - [ ] registrar una segunda cuenta y verificar que cada una ve solo sus datos (RLS);
+   - [x] registrar una segunda cuenta y verificar que cada una ve solo sus datos (RLS);
      - [x] lectura anónima vacía y rechazo de escritura con `user_id` ajeno;
-     - [ ] dos sesiones reales simultáneas.
+     - [x] dos sesiones reales simultáneas (cuenta temporal; `delete_my_account` respondió 204);
    - [ ] configurar Redirect URLs para el deploy;
    - [ ] probar login en dos dispositivos.
    - [x] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
@@ -238,12 +269,15 @@ segunda cuenta y el deploy.
 ### P1 · Próximas mejoras
 
 4. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
-   (22 tests). [x] Playwright para los flujos críticos (5 tests: semana, plato, compras, temas).
+   (22 tests). [x] Vitest para el modo de la app y el adaptador offline (14 tests más; 36 en
+   total). [x] Playwright para los flujos críticos (5 tests: semana, plato, compras, temas).
 5. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
    unidades) y [x] unificar nombres al generar la lista.
-6. **Cuenta:** [x] recuperación de contraseña y [x] borrado de cuenta (requiere el schema nuevo).
+6. **Cuenta:** [x] recuperación de contraseña, [x] borrado de cuenta (requiere el schema nuevo) y
+   [x] cuenta obligatoria para usar la app.
 7. **Nota del día:** [x] UI para editar y guardar la nota.
-8. **Manejo offline en nube:** pendiente (caché de lectura y reintento de escrituras).
+8. **Manejo offline en nube:** [x] caché de lectura por usuario, [x] cola de escrituras con
+   reintento automático/manual y [x] aviso de estado en la interfaz.
 9. **Normalizar ingredientes ya guardados:** [x] acción en Ajustes.
 10. **Unificar nombres de ingredientes al generar la lista:** [x] incluido en `buildShoppingItems`.
 
@@ -406,3 +440,31 @@ segunda cuenta y el deploy.
   sobre semana, plato, compras y temas. Corren con `npm run test:e2e` contra un Vite en
   `--mode e2e` (puerto 5175) que usa `tests/e2e/env` como `envDir` y arranca en modo local sin
   tocar el `.env.local`. Pasan los 5.
+
+### 2026-11-15 · Cuenta obligatoria y modo offline
+
+- **Cuenta obligatoria:** la app ya no ofrece un modo local para usuarios reales. Sin
+  `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` se muestra **“Falta configurar Supabase”**
+  con los pasos de setup. El modo local quedó reservado a Playwright (`--mode e2e` **y**
+  `VITE_E2E_LOCAL=1`); en producción esa variable se ignora.
+- **Archivos nuevos:**
+  - `src/lib/appMode.ts`: resuelve `cloud | e2e-local | unconfigured`.
+  - `src/lib/adapters/offline.ts`: caché de lectura + cola de escrituras por usuario.
+  - `src/lib/uuid.ts`: helpers `isUuid`/`newUuid` compartidos por los adaptadores.
+  - `tests/appMode.test.ts` y `tests/offline.test.ts`.
+- **Offline:** `createOfflineAdapter` envuelve al adaptador de Supabase. Cachea platos, planes y
+  compras por semana en claves `comidas:cache:v1:<userId>:*`; encola en
+  `comidas:queue:v1:<userId>` solo los errores de red. Al volver la conexión (o al abrir la
+  app) se reintenta en orden, compactando escrituras repetidas del mismo día.
+- **UI:** `Shell` muestra un aviso con el estado (“Sin conexión”, “Sincronizando” o cambios
+  pendientes) y un botón “Reintentar”. Al terminar la cola se releen los datos del servidor.
+- **Seguridad de la cola:** `replaceShopping` solo encola si esa semana ya estaba cacheada, para
+  no pisar una lista que nunca se leyó; `seedDishes` offline normaliza ids a UUID y encola
+  `saveDish`.
+- **Segunda cuenta (RLS):** se creó una cuenta temporal, se verificó que solo veía su propio
+  plato y que la cuenta principal no lo veía; `delete_my_account` respondió 204, el token
+  temporal pasó a 403 y los datos principales quedaron intactos.
+- **Verificación:** `npm test` 36/36, `npm run build` correcto y `npm run test:e2e` 5/5 (se
+  ajustó el locator del ítem manual “Pan rallado” para evitar el modo estricto de Playwright).
+- **Documentación:** README, `DESARROLLO.md`, `ESTADO.md` y `.env.example` actualizados para
+  cuenta obligatoria, offline y modo local solo de test.

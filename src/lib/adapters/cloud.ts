@@ -10,6 +10,7 @@ import type {
   ShoppingRow,
   Snapshot,
 } from '../../types'
+import { isUuid, newUuid } from '../uuid'
 
 interface DishRow {
   id: string
@@ -48,25 +49,6 @@ interface ShoppingDbRow {
 function toUser(user: User | null | undefined): SessionUser | null {
   if (!user) return null
   return { id: user.id, email: user.email ?? '' }
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function isUuid(value: string): boolean {
-  return UUID_PATTERN.test(value)
-}
-
-/** Supabase usa columnas uuid: los ids viejos (seed-dish-1, etc.) se regeneran al vuelo. */
-function newUuid(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const random = Math.floor(Math.random() * 16)
-    const value = char === 'x' ? random : (random & 0x3) | 0x8
-    return value.toString(16)
-  })
 }
 
 function mapDish(row: DishRow): Dish {

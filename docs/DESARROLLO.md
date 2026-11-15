@@ -8,7 +8,8 @@
 1. Abrí una terminal en la raíz del repo.
 2. Si es otra máquina o cambió `package.json`: `npm install`.
 3. Iniciá el servidor: `npm run dev` → <http://localhost:5173>.
-4. Sin `.env.local` la app arranca en **modo local** con 20 platos de ejemplo.
+4. Sin `.env.local` la app muestra **“Falta configurar Supabase”**: no hay modo local para
+   usuarios reales (solo para los tests de Playwright).
 5. Antes de cambiar código, confirmá que compila: `npm run build`.
 6. Leé [`ESTADO.md`](ESTADO.md) para saber qué está hecho y qué sigue.
 
@@ -20,7 +21,7 @@
 - **React 19** + **TypeScript** + **Vite**
 - **Tailwind CSS v4** (configurado con `@theme` en `src/index.css`, sin `tailwind.config`)
 - **vite-plugin-pwa** (service worker y manifest)
-- **Supabase** (opcional, solo para cuentas y sincronización)
+- **Supabase** (cuenta y sincronización; obligatorio para usar la app)
 - **date-fns** (fechas en español, semana que empieza lunes)
 - **lucide-react** (íconos), **clsx** (clases)
 - Tipografías **Fraunces** (títulos) e **Inter** (texto), empaquetadas con `@fontsource-variable`.
@@ -34,7 +35,7 @@
 | `npm run preview` | Sirve `dist/` para probar el build y la PWA. |
 | `npm test` | Corre los tests de lógica con Vitest (una vez). |
 | `npm run test:watch` | Vitest en modo interactivo durante el desarrollo. |
-| `npm run test:e2e` | Playwright sobre los flujos críticos en modo local (Chrome instalado). |
+| `npm run test:e2e` | Playwright sobre los flujos críticos en modo local de test (Chrome instalado). |
 | `npm run icons` | Regenera los íconos PWA en `public/icons/` (usa `sharp`). |
 | `npm install` | Instala dependencias. |
 
@@ -43,24 +44,26 @@ No hay linter. La lógica pura está cubierta con Vitest; los flujos visuales se
 
 ## Modos de datos
 
-La app elige el adaptador al arrancar, en `src/lib/adapters/index.ts`:
+La app elige el adaptador al arrancar en `src/lib/adapters/index.ts`, usando
+`resolveAppMode` (`src/lib/appMode.ts`):
+
+| Modo | Cuándo | Persistencia |
+| --- | --- | --- |
+| `cloud` | Hay `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`. | Supabase + caché/cola offline. **Es el modo real.** |
+| `e2e-local` | `import.meta.env.MODE === 'e2e'` **y** `VITE_E2E_LOCAL=1`. | `localStorage`, solo para Playwright. |
+| `unconfigured` | Cualquier otro caso. | Pantalla “Falta configurar Supabase”. |
 
 ```ts
-const url = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
-const key = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
-export const cloudConfigured = Boolean(url && key)
+export function resolveAppMode(env: ModeEnv): AppMode {
+  if (env.mode === 'e2e' && env.e2eLocal === '1') return 'e2e-local'
+  return env.url.trim() && env.key.trim() ? 'cloud' : 'unconfigured'
+}
 ```
 
-Si **ambas** variables tienen valor → nube. Si falta alguna o están vacías → local.
-
-### Modo local (por defecto)
-
-- Datos en `localStorage`, clave `comidas:db:v1`.
-- Usuario fijo interno (`local@comidas.app`); no hay login.
-- Al primer arranque siembra los 20 platos de `src/data/seed.ts`.
-- Pensado para un solo dispositivo. Si se borran los datos del navegador, se pierde todo
-  (por eso existe exportar/importar en Ajustes).
-- Para volver desde modo nube: borrá `.env.local` o dejá las variables vacías, y reiniciá el server.
+**Todos los usuarios necesitan cuenta.** No hay modo local en producción: si faltan las
+variables, la app no deja entrar a un almacenamiento local, muestra la pantalla de
+configuración (`ConfigMissing` en `App.tsx`). El modo `e2e-local` existe solo para que
+Playwright tenga un backend efímero y no pueda activarse en una build de producción.
 
 ### Modo nube (Supabase)
 
@@ -93,10 +96,38 @@ Detalles importantes:
   (`freezer_friendly`, `dish_id`) en `src/lib/adapters/cloud.ts`.
 - Al cargar ejemplos o importar un backup, los ids que no son UUID se regeneran y se
   remapean las referencias de planes/compras (necesario para las columnas `uuid`).
-- No hay cola offline ni sincronización en tiempo real: en nube, cada acción escribe
-  contra Supabase. Si falla la red, se muestra un toast y se recargan los datos.
 - `importAll` en nube **borra** los datos actuales antes de insertar el backup, sin
   transacción. Si algo falla a mitad, puede quedar información incompleta.
+
+### Modo offline (solo nube)
+
+`createOfflineAdapter` envuelve al adaptador de Supabase (`src/lib/adapters/offline.ts`) y agrega
+dos cosas, siempre **por usuario**:
+
+- **Caché de lectura** en `localStorage`:
+  - `comidas:cache:v1:<userId>:dishes`
+  - `comidas:cache:v1:<userId>:plans`
+  - `comidas:cache:v1:<userId>:shopping` (un objeto `weekStart → items`)
+
+  Si una lectura falla por red, se devuelven los últimos datos guardados. Si nunca se leyó esa
+  semana, se lanza un error (“Sin conexión y no hay datos guardados…”) en vez de inventar una
+  lista vacía.
+- **Cola de escrituras** en `comidas:queue:v1:<userId>`: solo se encolan errores de red
+  (`isOfflineError`). Un error de RLS/validación se muestra y se descarta esa operación, porque
+  reintentarla no lo arregla. Al volver `online` (o al abrir la app) se hace `flush()` en orden y
+  se compactan escrituras repetidas del mismo día.
+- **Optimismo:** antes de escribir se actualiza la caché; así la UI ve el cambio aunque la
+  operación quede pendiente.
+- **Compras:** `replaceShopping` solo se encola si esa semana ya estaba cacheada, para no pisar
+  en el servidor una lista que nunca se llegó a leer.
+- **Ejemplos offline:** `seedDishes` normaliza los ids a UUID y encola un `saveDish` por plato.
+- La UI muestra el estado en `Shell` (`OfflineBanner`): sin conexión, sincronizando o “N cambios
+  pendientes”, con botón **Reintentar**. `AppContext` expone `offlineStatus` y `retrySync`, y al
+  terminar la cola relee platos/planes/compras del servidor.
+
+La cola y la caché viven en el dispositivo: si se borran los datos del navegador antes de
+sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conflictos (gana la
+última escritura que llega) ni sincronización en tiempo real.
 
 ## Sistema de temas
 
@@ -170,9 +201,12 @@ Comidas/
 │  ├─ types.ts                 # Tipos de dominio y contrato DataAdapter
 │  ├─ state/AppContext.tsx     # Estado global y todas las acciones
 │  ├─ lib/
-│  │  ├─ adapters/index.ts     # Elige local o nube según env
-│  │  ├─ adapters/local.ts     # Persistencia en localStorage
+│  │  ├─ adapters/index.ts     # Elige nube / test local / sin configurar
+│  │  ├─ adapters/local.ts     # Persistencia en localStorage (solo tests)
 │  │  ├─ adapters/cloud.ts     # Supabase (auth + CRUD + import/export)
+│  │  ├─ adapters/offline.ts   # Caché de lectura y cola de escrituras por usuario
+│  │  ├─ appMode.ts            # cloud | e2e-local | unconfigured
+│  │  ├─ uuid.ts               # isUuid / newUuid compartidos
 │  │  ├─ suggest.ts            # Sugerencias y armado de lista de compras
 │  │  ├─ ingredients.ts        # Catálogo, normalización y búsqueda de ingredientes
 │  │  ├─ constants.ts          # Modos, colores, categorías, categorización
@@ -196,13 +230,13 @@ Comidas/
 │     ├─ ShoppingScreen.tsx    # Lista de compras
 │     ├─ HistoryScreen.tsx     # Historial de semanas
 │     ├─ SettingsScreen.tsx    # Ajustes, cuenta, backup, PWA
-│     ├─ AuthScreen.tsx        # Login/registro/recuperar (solo modo nube)
+│     ├─ AuthScreen.tsx        # Login/registro/recuperar (cuenta obligatoria)
 │     └─ ResetPasswordScreen.tsx # Contraseña nueva desde el link de recovery
 ├─ index.html                  # Script que aplica el tema antes del primer render
 ├─ supabase/schema.sql         # Tablas + RLS + delete_my_account()
-├─ tests/                      # Tests de Vitest (date, constants, suggest, ingredients)
+├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline)
 ├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas)
-├─ tests/e2e/env/.env          # Entorno vacío para forzar el modo local en Playwright
+├─ tests/e2e/env/.env          # Entorno de test (VITE_E2E_LOCAL=1) para forzar el modo local
 ├─ vitest.config.ts            # Configuración de Vitest
 ├─ playwright.config.ts        # Configuración de Playwright (Chrome instalado)
 ├─ public/icons/               # Íconos PWA generados
@@ -360,7 +394,7 @@ Si una palabra nueva choca con otra, recordá que gana la más larga, no la prim
   “Copiar a esta semana” usa `repeatWeek`.
 - Vaciar una semana también elimina su lista de compras.
 
-### Autenticación (solo nube)
+### Autenticación (cuenta obligatoria)
 
 - `AuthScreen` maneja ingreso, registro y **recuperación de contraseña** (`mode` `in | up |
   forgot`). Si el registro requiere confirmación, muestra un aviso.
@@ -444,6 +478,8 @@ Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, rev
 | `tests/constants.test.ts` | Los cuatro rubros, clasificación y palabra clave más larga. |
 | `tests/suggest.test.ts` | Dificultades, suma/conversión de unidades, tildados y manuales al regenerar. |
 | `tests/ingredients.test.ts` | Normalización, nombre canónico, catálogo y búsqueda tolerante a errores. |
+| `tests/appMode.test.ts` | Cuenta obligatoria: `cloud`, `unconfigured` y modo local solo con `--mode e2e` + `VITE_E2E_LOCAL=1`. |
+| `tests/offline.test.ts` | Errores de red, caché de lectura, cola por usuario, compactación, errores de RLS y ejemplos offline. |
 
 Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
 necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
@@ -454,7 +490,8 @@ necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lóg
 `npm run test:e2e` levanta Vite en `http://localhost:5175` con `--mode e2e` y corre los tests de
 `tests/e2e/*.spec.ts` en Chrome (canal `chrome`, sin descargar navegadores). El modo `e2e` usa
 `tests/e2e/env/.env` como `envDir` (ver `vite.config.ts`), así que **no toma** el `.env.local`
-real y arranca siempre en modo local con los 20 platos de ejemplo.
+real; ese archivo define `VITE_E2E_LOCAL=1`, la única combinación que habilita el modo local de
+test con los 20 platos de ejemplo. En una build de producción esa variable se ignora.
 
 | Archivo | Qué cubre |
 | --- | --- |
@@ -498,10 +535,16 @@ Antes de publicar, correr `npm test` y probar en `npm run dev`:
       contraseña nueva; “Volver al ingreso” descarta el cambio.
 - [ ] En nube: “Eliminar mi cuenta” pide doble confirmación y, si falta el schema nuevo,
       muestra el aviso correspondiente.
+- [ ] Cerrar sesión: la app vuelve al login y no deja ver datos sin cuenta.
+- [ ] Sin variables de Supabase, una build muestra “Falta configurar Supabase” (no un modo local).
+- [ ] Offline: con la app abierta, cortar la red; se ve el aviso “Sin conexión”. Navegar y
+      cambiar algo (por ejemplo, una nota o un plato); sigue funcionando con la caché.
+- [ ] Volver a conectar: la cola se sincroniza sola o con “Reintentar”; el aviso desaparece y,
+      tras recargar, los cambios están en Supabase.
 - [ ] `npm run build` y `npm run preview`: la PWA se instala y funciona offline.
 - [ ] Sin errores en la consola del navegador.
 
-Playwright para los flujos visuales sigue pendiente; por ahora esos puntos se revisan a mano.
+Los flujos críticos también corren automatizados con Playwright (`npm run test:e2e`).
 Los scripts temporales de capturas/auditoría usados durante el desarrollo se eliminaron a
 propósito.
 
@@ -510,7 +553,12 @@ propósito.
 - Es un sitio estático: build `npm run build`, publicar `dist/`.
 - Sirve en Vercel, Netlify, Cloudflare Pages, GitHub Pages o cualquier hosting estático.
 - Cargar `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` como variables de entorno del
-  proyecto **en tiempo de build** (Vite las inyecta al compilar).
+  proyecto **en tiempo de build** (Vite las inyecta al compilar). Son obligatorias: sin ellas la
+  app pública muestra “Falta configurar Supabase”. En Vercel, marcalas para **Production** y
+  **Preview**.
+- Después del primer deploy, agregá la URL pública en Supabase
+  (**Authentication → URL Configuration**: Site URL y Redirect URLs) para confirmación de email y
+  recuperación de contraseña.
 - Para instalar la PWA hace falta **HTTPS** (o `localhost`).
 - El service worker usa `registerType: 'autoUpdate'` y precachea JS/CSS/HTML/fuentes/íconos.
   Tras un deploy, puede hacer falta recargar una vez para tomar la versión nueva.
@@ -522,7 +570,8 @@ propósito.
 
 | Síntoma | Causa probable / solución |
 | --- | --- |
-| Aparece el login y no quería | Hay `.env.local` con credenciales; borralo o vacialo y reiniciá. |
+| “Falta configurar Supabase” | Faltan `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` en `.env.local` (o en las variables del deploy). La app exige cuenta; no hay modo local para usuarios. |
+| Aparece el login y no quería | Es el comportamiento esperado: la cuenta es obligatoria. Para los tests existe el modo `e2e-local`, no para uso real. |
 | “Email o contraseña incorrectos” | Credenciales mal, o el usuario no existe. |
 | “Confirmá tu email antes de ingresar” | Confirmación activa en Supabase; revisá el correo o desactivala para probar. |
 | Error de `uuid` al importar/cargar ejemplos | Ya se normalizan ids; si persiste, revisá que el schema tenga las columnas `uuid`. |
@@ -536,4 +585,6 @@ propósito.
 | Un ítem manual desapareció al regenerar | Debe tener `dishId: null`; si se importó desde un backup viejo, revisá el JSON. |
 | Se ve un destello del tema claro al recargar | Revisá que el script inline de `index.html` esté antes del CSS/JS y que `comidas:theme` sea válido. |
 | La lista de compras no refleja un cambio de receta | Regenerala; la app solo detecta platos nuevos, no cambios internos. |
+| Un cambio hecho sin conexión no aparece en Supabase | Mirá el aviso de cambios pendientes y tocá “Reintentar”; si la sesión expiró, volvé a ingresar. |
+| El primer arranque sin red no muestra datos | La caché se llena en la primera lectura online; sin datos guardados la app avisa que no hay nada. |
 | Los tests fallan por `window is not defined` | Vitest corre en `node`: mové la lógica pura a `src/lib` o agregá un entorno `jsdom` solo para ese archivo. |

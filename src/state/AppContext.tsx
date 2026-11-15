@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -11,6 +12,7 @@ import type {
   DayMode,
   DayPlan,
   Dish,
+  OfflineStatus,
   PlanRow,
   SessionUser,
   ShoppingItem,
@@ -45,6 +47,10 @@ interface AppContextValue {
   /** Los datos iniciales (platos y planes) ya se cargaron al menos una vez. */
   loaded: boolean
   busy: boolean
+  /** Estado de red y cambios pendientes de sincronizar (modo nube). */
+  offlineStatus: OfflineStatus
+  /** Reintenta a mano la cola de cambios pendientes. */
+  retrySync: () => void
   user: SessionUser | null
   isCloud: boolean
   cloudConfigured: boolean
@@ -106,6 +112,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [shopping, setShopping] = useState<ShoppingItem[]>([])
   const [history, setHistory] = useState<string[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [offlineStatus, setOfflineStatus] = useState<OfflineStatus>(() =>
+    adapter.offline?.getStatus() ?? {
+      online: true,
+      pending: 0,
+      syncing: false,
+      lastError: null,
+    },
+  )
 
   const toast = useCallback((message: string, tone: ToastTone = 'info') => {
     const id = makeId()
@@ -201,6 +215,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
       alive = false
     }
   }, [user?.id, weekStart, adapter, toast])
+
+  /* --------------------------- Offline / sincronización --------------------------- */
+
+  const wasSyncing = useRef(false)
+  const lastErrorAt = useRef(0)
+
+  useEffect(() => {
+    const support = adapter.offline
+    if (!support) {
+      setOfflineStatus({ online: true, pending: 0, syncing: false, lastError: null })
+      return
+    }
+    setOfflineStatus(support.getStatus())
+    return support.subscribe(setOfflineStatus)
+  }, [adapter])
+
+  useEffect(() => {
+    // Cuando termina una sincronización sin pendientes, releemos del servidor
+    // para confirmar que la cola dejó la misma foto que mostramos en pantalla.
+    if (wasSyncing.current && !offlineStatus.syncing && offlineStatus.pending === 0) {
+      void reloadAll().catch(() => {})
+      void adapter
+        .listShopping(weekStart)
+        .then(setShopping)
+        .catch(() => {})
+    }
+    wasSyncing.current = offlineStatus.syncing
+
+    const error = offlineStatus.lastError
+    if (error && error.at !== lastErrorAt.current) {
+      lastErrorAt.current = error.at
+      toast(`No pudimos sincronizar un cambio: ${error.message}`, 'error')
+    }
+  }, [adapter, offlineStatus, reloadAll, toast, weekStart])
+
+  const retrySync = useCallback(() => {
+    void adapter.offline?.flush()
+  }, [adapter])
 
   /* ------------------------------- Derivados ------------------------------- */
 
@@ -630,6 +682,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ready,
     loaded,
     busy,
+    offlineStatus,
+    retrySync,
     user,
     isCloud: cloudConfigured,
     cloudConfigured,

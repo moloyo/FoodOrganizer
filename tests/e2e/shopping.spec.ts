@@ -22,9 +22,13 @@ test('la lista de compras agrupa, tilda y acepta ítems manuales', async ({ page
 
   await page.getByPlaceholder('Agregar ítem (ej. pan rallado)').fill('Pan rallado')
   await page.getByRole('button', { name: 'Agregar ítem' }).click()
-  await expect(page.getByText('Pan rallado')).toBeVisible()
+
+  // El ítem generado es "Pan rallado · 200 g", así que el manual se ubica
+  // por su nombre exacto para no caer en el modo estricto de Playwright.
+  const manualItem = page.getByRole('button', { name: 'Marcar Pan rallado', exact: true })
+  await expect(manualItem).toBeVisible()
 
   page.on('dialog', (dialog) => void dialog.accept())
-  await page.getByRole('button', { name: 'Quitar Pan rallado' }).click()
-  await expect(page.getByText('Pan rallado')).toBeHidden()
+  await page.getByRole('button', { name: 'Quitar Pan rallado', exact: true }).click()
+  await expect(manualItem).toBeHidden()
 })
