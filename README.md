@@ -59,6 +59,7 @@ La app detecta si hay credenciales de Supabase:
 npm install
 npm run dev      # http://localhost:5173
 npm test         # tests de lógica (Vitest)
+npm run test:e2e # tests de interfaz (Playwright + Chrome)
 npm run build    # genera dist/
 npm run preview  # sirve el build
 npm run icons    # regenera los íconos PWA (requiere sharp)

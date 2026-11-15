@@ -176,6 +176,10 @@ segunda cuenta y el deploy.
 - **Carga inicial (15/11/2026):** se corrigió un destello del estado “Tu recetario está vacío”
   mientras llegaban los datos de la nube: ahora se muestra el splash hasta que termina la
   primera carga.
+- **Tests de interfaz (15/11/2026):** `npm run test:e2e` corre 5 tests de Playwright en Chrome
+  sobre un Vite en modo local (puerto 5175): “Sorpréndeme” y persistencia, elección de plato por
+  dificultad, alta de plato con “eso” → “Queso”, compras con tildado e ítem manual, y temas.
+  El modo `e2e` usa `tests/e2e/env` como `envDir` y no toca el `.env.local` real.
 - **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
   queda en ~625 kB (aviso de tamaño, no bloqueante).
 
@@ -185,8 +189,8 @@ segunda cuenta y el deploy.
   rechazo de escrituras con `user_id` ajeno, pero no con dos sesiones reales simultáneas.
 - **Falta configurar el deploy.** Las Redirect URLs de Supabase y el login en dos dispositivos
   necesitan una URL pública.
-- **No hay tests de interfaz.** La lógica pura está cubierta con Vitest, pero los flujos
-  visuales (semana, modales, PWA) se verifican a mano; no hay Playwright ni linter.
+- **No hay linter.** La lógica pura está cubierta con Vitest y los flujos críticos con
+  Playwright; la PWA, el modo nube y los detalles visuales se siguen revisando a mano.
 - **La lista no detecta cambios internos de una receta.** Solo marca “desactualizada” cuando
   hay un plato planificado sin ítems; hay que regenerarla a mano.
 - **Cambiar un ítem generado desde una receta** obliga a editar el plato y regenerar; en la
@@ -234,7 +238,7 @@ segunda cuenta y el deploy.
 ### P1 · Próximas mejoras
 
 4. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
-   (22 tests). [ ] Playwright para los flujos críticos.
+   (22 tests). [x] Playwright para los flujos críticos (5 tests: semana, plato, compras, temas).
 5. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
    unidades) y [x] unificar nombres al generar la lista.
 6. **Cuenta:** [x] recuperación de contraseña y [x] borrado de cuenta (requiere el schema nuevo).
@@ -398,3 +402,7 @@ segunda cuenta y el deploy.
   terminan de llegar platos y planes; se evita el falso “Tu recetario está vacío” al entrar.
 - **Pendiente de P0.2:** segunda cuenta real, Redirect URLs del deploy y login en dos
   dispositivos.
+- **Tests de interfaz:** se agregó Playwright (`playwright.config.ts`, `tests/e2e/`) con 5 tests
+  sobre semana, plato, compras y temas. Corren con `npm run test:e2e` contra un Vite en
+  `--mode e2e` (puerto 5175) que usa `tests/e2e/env` como `envDir` y arranca en modo local sin
+  tocar el `.env.local`. Pasan los 5.

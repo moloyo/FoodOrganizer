@@ -34,6 +34,7 @@
 | `npm run preview` | Sirve `dist/` para probar el build y la PWA. |
 | `npm test` | Corre los tests de lógica con Vitest (una vez). |
 | `npm run test:watch` | Vitest en modo interactivo durante el desarrollo. |
+| `npm run test:e2e` | Playwright sobre los flujos críticos en modo local (Chrome instalado). |
 | `npm run icons` | Regenera los íconos PWA en `public/icons/` (usa `sharp`). |
 | `npm install` | Instala dependencias. |
 
@@ -200,7 +201,10 @@ Comidas/
 ├─ index.html                  # Script que aplica el tema antes del primer render
 ├─ supabase/schema.sql         # Tablas + RLS + delete_my_account()
 ├─ tests/                      # Tests de Vitest (date, constants, suggest, ingredients)
+├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas)
+├─ tests/e2e/env/.env          # Entorno vacío para forzar el modo local en Playwright
 ├─ vitest.config.ts            # Configuración de Vitest
+├─ playwright.config.ts        # Configuración de Playwright (Chrome instalado)
 ├─ public/icons/               # Íconos PWA generados
 ├─ docs/                       # Esta guía y estado del proyecto
 └─ vite.config.ts              # Manifest y service worker
@@ -444,6 +448,23 @@ Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, rev
 Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
 necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
 `src/lib` para poder testearla en `node`.
+
+### Tests de interfaz (Playwright)
+
+`npm run test:e2e` levanta Vite en `http://localhost:5175` con `--mode e2e` y corre los tests de
+`tests/e2e/*.spec.ts` en Chrome (canal `chrome`, sin descargar navegadores). El modo `e2e` usa
+`tests/e2e/env/.env` como `envDir` (ver `vite.config.ts`), así que **no toma** el `.env.local`
+real y arranca siempre en modo local con los 20 platos de ejemplo.
+
+| Archivo | Qué cubre |
+| --- | --- |
+| `tests/e2e/week.spec.ts` | “Sorpréndeme” completa la semana, persiste al recargar y se elige un plato según la dificultad. |
+| `tests/e2e/dishes.spec.ts` | Alta de plato con autocompletado “eso” → “Queso”, guardado y persistencia. |
+| `tests/e2e/shopping.spec.ts` | Lista agrupada por rubros, tildado e ítem manual (alta y borrado). |
+| `tests/e2e/themes.spec.ts` | Tema oscuro aplicado, color de barra y persistencia tras recargar; vuelta a clásico. |
+
+Cada test usa un contexto nuevo, así que el `localStorage` arranca limpio. Si Playwright falla,
+deja capturas/traza en `test-results/` (ignorado por git).
 
 ## Verificación manual
 

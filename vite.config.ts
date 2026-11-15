@@ -3,7 +3,10 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // Los tests de interfaz fuerzan el modo local usando una carpeta de entorno sin claves,
+  // sin tocar el .env.local real de la máquina.
+  envDir: mode === 'e2e' ? 'tests/e2e/env' : '.',
   plugins: [
     react(),
     tailwindcss(),
@@ -52,4 +55,4 @@ export default defineConfig({
       },
     }),
   ],
-})
+}))
