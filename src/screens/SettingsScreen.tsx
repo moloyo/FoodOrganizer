@@ -493,47 +493,6 @@ export function SettingsScreen() {
                 )}
               </div>
 
-              <div
-                className={clsx(
-                  'rounded-2xl border p-4',
-                  puedeSalir
-                    ? 'border-danger-border bg-danger-soft/60'
-                    : 'border-line bg-cream',
-                )}
-              >
-                <p
-                  className={clsx(
-                    'text-[13px] font-semibold',
-                    puedeSalir ? 'text-danger-strong' : 'text-ink',
-                  )}
-                >
-                  Salir del hogar
-                </p>
-                {puedeSalir ? (
-                  <>
-                    <p className="mt-1 text-[11.5px] leading-relaxed text-danger-ink">
-                      Los datos compartidos quedan en el hogar y pasás a un hogar nuevo vacío.
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      className="mt-3"
-                      onClick={() => void handleLeaveHousehold()}
-                      disabled={householdBusy === 'leave'}
-                    >
-                      <LogOut className="size-3.5" />
-                      {householdBusy === 'leave' ? 'Saliendo…' : 'Salir del hogar'}
-                    </Button>
-                  </>
-                ) : (
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
-                    Sos el único miembro: si salieras, el hogar y todos sus datos se
-                    borrarían. Para cambiarte a otro hogar abrí un link de invitación (tus
-                    platos viajan con vos). Si querés empezar de cero, usá “Borrar todos
-                    mis datos”.
-                  </p>
-                )}
-              </div>
             </div>
           )}
         </Section>
@@ -746,6 +705,19 @@ export function SettingsScreen() {
 
       <Section title="Zona peligrosa">
         <div className="space-y-2">
+          {isCloud && puedeSalir && (
+            <button
+              onClick={() => void handleLeaveHousehold()}
+              disabled={householdBusy === 'leave'}
+              className="flex w-full items-center gap-3 rounded-2xl border border-danger-border bg-danger-soft/60 px-4 py-3.5 text-left transition hover:bg-danger-soft disabled:opacity-60"
+            >
+              <LogOut className="size-4 text-danger-ink" />
+              <span className="flex-1 text-[13px] font-medium text-danger-strong">
+                {householdBusy === 'leave' ? 'Saliendo del hogar…' : 'Salir del hogar'}
+              </span>
+              <span className="text-[10.5px] text-danger-ink/70">Datos compartidos</span>
+            </button>
+          )}
           {isCloud && (
             <button
               onClick={() => void handleDeleteAccount()}

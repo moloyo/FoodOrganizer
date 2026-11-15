@@ -176,11 +176,11 @@ sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conf
   hogar compartido para unirse a otro, esos datos viajan con él; “Salir del hogar” en cambio los
   deja donde están.
 - **Salir siendo único miembro:** `household_leave()` borraría el hogar vacío y el cascade se
-  llevaría platos, planes y compras. `canLeaveHousehold()` (`src/lib/household.ts`) bloquea la
-  acción en la UI (`memberCount > 1`) y el handler tiene guardia defensiva con el mismo criterio.
-  El botón se reemplaza por un texto que sugiere usar una invitación o “Borrar todos mis datos”.
-  El borrado de **cuenta** sí elimina el hogar cuando era el último miembro (está documentado y
-  es intencional).
+  llevaría platos, planes y compras. `canLeaveHousehold()` (`src/lib/household.ts`) decide la
+  visibilidad de la opción en **Ajustes → Zona peligrosa**: si `memberCount <= 1`, **la opción se
+  oculta por completo** (sin texto explicativo) y el handler mantiene una guardia defensiva.
+  El borrado de **cuenta** sí elimina el hogar cuando era el último miembro (intencional y
+  documentado).
 
 ## Sistema de temas
 
@@ -416,6 +416,11 @@ En `src/lib/ingredients.ts` + `src/components/IngredientNameInput.tsx`:
 - `mergeShopping(previous, fresh, makeId)` reemplaza lo generado por recetas y conserva:
   - los **tildados** (por texto y por nombre de ingrediente);
   - los **ítems manuales** (`dishId: null`), con su id y edición.
+- **Ítems manuales:** el formulario de alta y el editor usan `IngredientNameInput`
+  (autocompletado con el catálogo del recetario + lista base, y nombre canónico al salir del
+  campo) y un `<select>` de rubro con opción **“Automático”** (deduce con `guessCategory`).
+  `addShoppingItem(texto, rubro)` guarda el rubro elegido; `updateShoppingItem(id, texto, rubro)`
+  también permite cambiarlo al editar.
 - **Editar/borrar:** en la UI solo se muestran los botones para ítems manuales. Usan
   `updateShoppingItem` y `deleteShoppingItem`; los generados se cambian desde la receta y
   regenerando.
@@ -574,7 +579,7 @@ test con los 20 platos de ejemplo. En una build de producción esa variable se i
 | --- | --- |
 | `tests/e2e/week.spec.ts` | “Sorpréndeme” completa la semana, persiste al recargar y se elige un plato según la dificultad. |
 | `tests/e2e/dishes.spec.ts` | Alta de plato con autocompletado “eso” → “Queso”, guardado y persistencia. |
-| `tests/e2e/shopping.spec.ts` | Lista agrupada por rubros, tildado e ítem manual (alta y borrado). |
+| `tests/e2e/shopping.spec.ts` | Lista agrupada por rubros, tildado e ítem manual (alta y borrado); autocompletado del nombre y elección de rubro en el ítem manual. |
 | `tests/e2e/themes.spec.ts` | Tema oscuro aplicado, color de barra y persistencia tras recargar; vuelta a clásico. |
 
 Cada test usa un contexto nuevo, así que el `localStorage` arranca limpio. Si Playwright falla,
@@ -624,8 +629,10 @@ Antes de publicar, correr `npm test` y probar en `npm run dev`:
 - [ ] Un cambio hecho por un miembro aparece para el otro al recargar.
 - [ ] “Salir del hogar”: los datos compartidos siguen visibles para quien queda y quien salió
       ve un hogar nuevo vacío.
-- [ ] Siendo el único miembro, “Salir del hogar” no muestra botón y explica que hay que usar
-      una invitación.
+- [ ] Siendo el único miembro, “Salir del hogar” no aparece en Zona peligrosa.
+- [ ] Agregar un ítem manual eligiendo un rubro a mano; escribir “eso” y elegir “Queso” del
+      autocompletado; confirmar que se guarda en el rubro elegido.
+- [ ] Editar un ítem manual y cambiarle el rubro; recargar y verificar que persiste.
 - [ ] Con dos cuentas, verificar por SQL que un `select` con el JWT de la segunda no ve filas
       de un hogar ajeno (RLS por `is_household_member`).
 - [ ] `npm run build` y `npm run preview`: la PWA se instala y funciona offline.

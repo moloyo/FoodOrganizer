@@ -58,8 +58,10 @@ pareja en dos dispositivos.
 - **Unidades compatibles:** suma y convierte masas (g/kg), volúmenes (ml/l/cda/cdta/taza) y
   unidades. “500 g + 1 kg” → “1.5 kg”; “200 ml + 1 cda” → “215 ml”; “3 cda + 2 cda” → “5 cda”.
 - Unifica nombres de ingredientes sin distinguir mayúsculas, tildes ni espacios.
-- **Ítems manuales editables:** se pueden cambiar el nombre y la cantidad, o quitarlos de la
-  lista. Los ítems generados desde un plato no se editan a mano.
+- **Ítems manuales editables:** se pueden cambiar el nombre, la cantidad y el **rubro**, o
+  quitarlos de la lista. El nombre usa el mismo autocompletado del recetario (“eso” → “Queso”)
+  y al agregar se puede elegir entre Automático y los cuatro rubros. Los ítems generados desde
+  un plato no se editan a mano.
 - Suma cantidades numéricas y conserva los tildados **y los ítems manuales** al regenerar.
 - Ítems manuales, tildado persistente y acción de compartir/copiar.
 - Aviso de lista desactualizada cuando se agrega un plato sin ítems.
@@ -84,7 +86,8 @@ pareja en dos dispositivos.
 - **Normalizar ingredientes:** unifica variantes ya guardadas (“queso” → “Queso”) y reasigna
   rubros viejos en todos los platos.
 - Pasos para conectar Supabase.
-- Leyenda de dificultades y borrado total de datos.
+- **Zona peligrosa:** eliminar la cuenta (doble confirmación), **salir del hogar** y borrar
+  todos los datos.
 
 ### Hogar compartido (implementado, aplicado y desplegado)
 
@@ -97,9 +100,9 @@ pareja en dos dispositivos.
 - **Migración de datos**: `supabase/migration_hogares.sql` crea `households`,
   `household_members` y `household_invites`, agrega `household_id` a las tres tablas, migra las
   filas existentes sin perder nada y cambia el RLS a `is_household_member(household_id)`.
-- **Salir del hogar**: solo se habilita cuando queda otro miembro. Si sos el único, la UI lo
-  bloquea (el hogar vacío se borraría con todos sus datos) y sugiere usar una invitación o
-  “Borrar todos mis datos”. `canLeaveHousehold()` centraliza la regla y está cubierta por tests.
+- **Salir del hogar**: vive en **Zona peligrosa** y solo se muestra cuando queda otro miembro.
+  Si sos el único, la opción se oculta por completo (el hogar vacío se borraría con todos sus
+  datos). La regla está en `canLeaveHousehold()` y tiene tests.
 - **Borrado de cuenta**: si el hogar tiene otros miembros, los datos compartidos sobreviven;
   si era el último, el hogar y sus datos se eliminan.
 
@@ -123,7 +126,7 @@ pareja en dos dispositivos.
 - PWA con manifest, íconos, service worker y precache.
 - **Tests con Vitest** para fechas, rubros, sugerencias, unidades de compras e ingredientes,
   más el modo de la app, el adaptador offline (ahora por hogar) y los links de invitación.
-- **Tests de interfaz con Playwright** (5 flujos críticos).
+- **Tests de interfaz con Playwright** (6 flujos críticos).
 - Repositorio git inicializado con historial (`main`).
 - README en español con setup y deploy.
 - Responsive mobile-first; sin desbordes horizontales a 390 px.
@@ -163,7 +166,7 @@ pareja en dos dispositivos.
 | **RPC `security definer` para membresías** | Evita recursión de RLS sobre `household_members` y que un usuario se autoasigne a un hogar ajeno. |
 | **`user_id` sin FK y nullable** | Borrar una cuenta no debe borrar por cascade los datos de un hogar compartido; queda solo como autoría. |
 | **Migración de datos sin pérdida** | La cuenta principal ya tiene 21 platos, 7 planes y 32 compras: se asocian a un hogar nuevo en vez de empezar de cero. |
-| **Bloquear “Salir” al único miembro** | La RPC borra el hogar vacío por cascade; perder todas las recetas por un botón de configuración es inaceptable. Para cambiar de hogar alcanza con un link de invitación. |
+| **Ocultar “Salir” al único miembro** | La RPC borra el hogar vacío por cascade; perder todas las recetas por un botón de configuración es inaceptable. Se oculta la opción, sin texto explicativo que distraiga. |
 | Temas con variables CSS y `data-theme` | Un solo juego de utilidades Tailwind: el tema cambia redeclarando variables, sin duplicar clases ni componentes. |
 | Preferencia de tema por dispositivo | Es una decisión de pantalla, no un dato de la cuenta; no se sincroniza con Supabase. |
 
@@ -230,10 +233,11 @@ pareja en dos dispositivos.
 - **Carga inicial (15/11/2026):** se corrigió un destello del estado “Tu recetario está vacío”
   mientras llegaban los datos de la nube: ahora se muestra el splash hasta que termina la
   primera carga.
-- **Tests de interfaz (15/11/2026):** `npm run test:e2e` corre 5 tests de Playwright en Chrome
+- **Tests de interfaz (15/11/2026):** `npm run test:e2e` corre **6 tests** de Playwright en Chrome
   sobre un Vite en modo local (puerto 5175): “Sorpréndeme” y persistencia, elección de plato por
-  dificultad, alta de plato con “eso” → “Queso”, compras con tildado e ítem manual, y temas.
-  El modo `e2e` usa `tests/e2e/env` como `envDir` y no toca el `.env.local` real.
+  dificultad, alta de plato con “eso” → “Queso”, compras con tildado e ítem manual, **rubro y
+  autocompletado del ítem manual**, y temas. El modo `e2e` usa `tests/e2e/env` como `envDir` y
+  no toca el `.env.local` real.
 - **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
   queda en ~638 kB (aviso de tamaño, no bloqueante).
 - **Cuenta obligatoria (15/11/2026):** sin credenciales de Supabase la app muestra “Falta
@@ -333,11 +337,12 @@ pareja en dos dispositivos.
 
 5. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
    (22 tests). [x] Vitest para el modo de la app, el adaptador offline y los links de
-   invitación y la regla de salida (22 tests más; **44 en total**). [x] Playwright para los flujos críticos (5 tests).
+   invitación y la regla de salida (22 tests más; **44 en total**). [x] Playwright para los flujos críticos (**6 tests**).
 6. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
-   unidades) y [x] unificar nombres al generar la lista.
+   unidades), [x] unificar nombres al generar la lista y [x] rubro + autocompletado al agregar
+   o editar ítems manuales.
 7. **Cuenta:** [x] recuperación de contraseña, [x] borrado de cuenta, [x] cuenta obligatoria y
-   [x] hogar compartido (código listo; falta aplicar la migración).
+   [x] hogar compartido (migración aplicada y verificada).
 8. **Nota del día:** [x] UI para editar y guardar la nota.
 9. **Manejo offline en nube:** [x] caché de lectura por hogar, [x] cola de escrituras con
    reintento automático/manual y [x] aviso de estado en la interfaz.
@@ -581,16 +586,33 @@ pareja en dos dispositivos.
   encabezados pertenezcan a los cuatro rubros permitidos (normalizando mayúsculas del CSS).
 - **Pendiente:** prueba del flujo real con la pareja en dos dispositivos.
 
-### 2026-11-15 · Bloqueo de salida para hogar de un solo miembro
+### 2026-11-15 · Ocultar salida para hogar de un solo miembro
 
 - **Problema detectado:** `household_leave()` borra el hogar cuando no quedan miembros y el
   cascade elimina platos, planes, compras e invitaciones. El texto de Ajustes decía que “los
   datos compartidos quedan en el hogar”, lo cual es falso para ese caso.
-- **Decisión del usuario:** bloquear la salida (sin cambiar SQL).
+- **Decisión del usuario:** ocultar la opción, sin texto explicativo, y ubicarla en **Zona
+  peligrosa** (sin cambiar SQL).
 - **Implementación:** `src/lib/household.ts` con `canLeaveHousehold()` (`memberCount > 1`);
-  la sección “Salir del hogar” muestra un texto explicativo en vez del botón cuando la persona
-  es la única, y `handleLeaveHousehold()` tiene guardia defensiva con la misma regla.
+  la opción se omite por completo cuando la persona es la única y, cuando se muestra, es una
+  fila más de Zona peligrosa. `handleLeaveHousehold()` conserva la guardia defensiva.
 - **Tests:** `tests/household.test.ts` (3 casos). `npm test` pasa a **44/44**; README,
   `DESARROLLO.md` y este estado actualizados.
 - **No se tocó la migración SQL:** el borrado de cuenta del último miembro sigue eliminando el
   hogar (intencional y documentado).
+
+### 2026-11-15 · Rubro y autocompletado en ítems manuales de compras
+
+- **Pedido:** al agregar un ítem a mano no se podía elegir el rubro y faltaba el
+  autocompletado de ingredientes en esa sección.
+- **Implementación:** `ShoppingScreen` usa `IngredientNameInput` (catálogo del recetario +
+  lista base, nombre canónico al salir del campo) tanto en el formulario de alta como en el
+  editor. Se agregó `CategorySelect` con opción **Automático** (deduce con `guessCategory`) y
+  los cuatro rubros. `addShoppingItem(texto, rubro)` y
+  `updateShoppingItem(id, texto, rubro)` ahora respetan el rubro elegido; el editor también
+  permite cambiarlo. `IngredientNameInput` acepta `autoFocus` para el `Sheet`.
+- **Tests:** nuevo caso E2E que escribe “eso”, elige la sugerencia de Queso, selecciona
+  Dietética y verifica que el ítem quede en ese rubro. `npm run test:e2e` pasa a **6/6**
+  (corrido 2 veces). Se ajustaron dos locadores del test de compras porque las `<option>` del
+  selector también coincidían con `getByText(/^Verdulería$/)`.
+- **Verificación:** `npx tsc -b` limpio, `npm test` 44/44, `npm run build` correcto.

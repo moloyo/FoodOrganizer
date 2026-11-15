@@ -17,11 +17,13 @@ export function IngredientNameInput({
   onChange,
   catalog,
   placeholder = 'Ingrediente',
+  autoFocus = false,
 }: {
   value: string
   onChange: (value: string) => void
   catalog: IngredientSuggestion[]
   placeholder?: string
+  autoFocus?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
@@ -82,6 +84,7 @@ export function IngredientNameInput({
           }
         }}
         placeholder={placeholder}
+        autoFocus={autoFocus}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={showList}

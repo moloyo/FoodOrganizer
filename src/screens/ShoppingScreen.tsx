@@ -13,10 +13,41 @@ import clsx from 'clsx'
 import { useApp } from '../state/AppContext'
 import { ScreenHeader } from '../components/Shell'
 import { Button, EmptyState, Input, Sheet } from '../components/ui'
+import { IngredientNameInput } from '../components/IngredientNameInput'
 import { CATEGORIES, CATEGORY_COLORS, guessCategory } from '../lib/constants'
+import { buildIngredientCatalog } from '../lib/ingredients'
 import { formatWeekRange } from '../lib/date'
 import { sortShopping } from '../lib/suggest'
 import type { ShoppingItem } from '../types'
+
+function CategorySelect({
+  id,
+  value,
+  onChange,
+  autoHint,
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  autoHint?: string
+}) {
+  return (
+    <select
+      id={id}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label="Rubro"
+      className="min-w-0 flex-1 rounded-lg border border-line bg-field px-2.5 py-1.5 text-[13px] text-ink focus:border-brand focus:outline-none"
+    >
+      <option value="">Automático{autoHint ? ` (${autoHint})` : ''}</option>
+      {CATEGORIES.map((category) => (
+        <option key={category} value={category}>
+          {category}
+        </option>
+      ))}
+    </select>
+  )
+}
 
 export function ShoppingScreen() {
   const {
@@ -30,16 +61,20 @@ export function ShoppingScreen() {
     clearCheckedShopping,
     weekStart,
     days,
+    dishes,
     toast,
     busy,
   } = useApp()
 
   const [text, setText] = useState('')
+  const [category, setCategory] = useState('')
   const [generating, setGenerating] = useState(false)
   const [editing, setEditing] = useState<ShoppingItem | null>(null)
   const [editName, setEditName] = useState('')
   const [editDetail, setEditDetail] = useState('')
+  const [editCategory, setEditCategory] = useState('')
 
+  const catalog = useMemo(() => buildIngredientCatalog(dishes), [dishes])
   const ordered = useMemo(() => sortShopping(shopping), [shopping])
   const checked = shopping.filter((item) => item.checked).length
   const plannedDishes = days.filter((day) => day.dishId).length
@@ -71,8 +106,10 @@ export function ShoppingScreen() {
     event.preventDefault()
     const value = text.trim()
     if (!value) return
+    const finalCategory = category || guessCategory(value)
     setText('')
-    await addShoppingItem(value, guessCategory(value))
+    setCategory('')
+    await addShoppingItem(value, finalCategory)
   }
 
   function openEdit(item: ShoppingItem) {
@@ -80,6 +117,7 @@ export function ShoppingScreen() {
     setEditing(item)
     setEditName(name)
     setEditDetail(rest.join(' · '))
+    setEditCategory(item.category)
   }
 
   async function saveEdit() {
@@ -90,7 +128,11 @@ export function ShoppingScreen() {
       return
     }
     const detail = editDetail.trim()
-    await updateShoppingItem(editing.id, `${name}${detail ? ` · ${detail}` : ''}`)
+    await updateShoppingItem(
+      editing.id,
+      `${name}${detail ? ` · ${detail}` : ''}`,
+      editCategory,
+    )
     setEditing(null)
   }
 
@@ -195,16 +237,32 @@ export function ShoppingScreen() {
         </div>
       )}
 
-      <form onSubmit={handleAdd} className="flex gap-2">
-        <Input
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Agregar ítem (ej. pan rallado)"
-          className="flex-1"
-        />
-        <Button type="submit" size="icon" aria-label="Agregar ítem" disabled={!text.trim()}>
-          <Plus className="size-4" />
-        </Button>
+      <form onSubmit={handleAdd} className="space-y-2">
+        <div className="flex gap-2">
+          <IngredientNameInput
+            value={text}
+            onChange={setText}
+            catalog={catalog}
+            placeholder="Agregar ítem (ej. pan rallado)"
+          />
+          <Button type="submit" size="icon" aria-label="Agregar ítem" disabled={!text.trim()}>
+            <Plus className="size-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="rubro-manual"
+            className="shrink-0 text-[10.5px] font-bold uppercase tracking-wide text-muted"
+          >
+            Rubro
+          </label>
+          <CategorySelect
+            id="rubro-manual"
+            value={category}
+            onChange={setCategory}
+            autoHint={text.trim() ? guessCategory(text.trim()) : undefined}
+          />
+        </div>
       </form>
 
       {shopping.length === 0 ? (
@@ -315,17 +373,18 @@ export function ShoppingScreen() {
           </div>
         }
       >
-        <label className="block">
+        <div>
           <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Nombre
           </span>
-          <Input
+          <IngredientNameInput
             value={editName}
-            onChange={(event) => setEditName(event.target.value)}
+            onChange={setEditName}
+            catalog={catalog}
             placeholder="Ej.: Pan rallado"
             autoFocus
           />
-        </label>
+        </div>
         <label className="mt-3 block">
           <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Cantidad / detalle
@@ -334,6 +393,16 @@ export function ShoppingScreen() {
             value={editDetail}
             onChange={(event) => setEditDetail(event.target.value)}
             placeholder="Ej.: 500 g, 2 u, 1 lata"
+          />
+        </label>
+        <label className="mt-3 block">
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Rubro
+          </span>
+          <CategorySelect
+            id="rubro-edicion"
+            value={editCategory}
+            onChange={setEditCategory}
           />
         </label>
       </Sheet>

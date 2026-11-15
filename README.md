@@ -20,7 +20,7 @@ Pensada mobile-first, en español, para cocina vegetariana.
 - **Semana**: para cada día elegís una dificultad (Del freezer, Muy fácil, Fácil, Media, Elaborada) y la app sugiere platos que encajan. Podés dejar una nota por día ("sobró arroz, usarlo el jueves").
 - **Recetario**: platos con dificultad, tiempo, etiquetas, ingredientes, pasos, link y si son aptos para freezer. El nombre del ingrediente se autocompleta para evitar duplicados.
 - **Sugerencias**: "Sorpréndeme" completa los días vacíos sin repetir platos y priorizando favoritos.
-- **Compras**: arma la lista de la semana agrupada en Verdulería, Supermercado, Dietética y Otros, suma cantidades compatibles (500 g + 1 kg → 1.5 kg), conserva lo tildado y deja editar o borrar los ítems manuales.
+- **Compras**: arma la lista de la semana agrupada en Verdulería, Supermercado, Dietética y Otros, suma cantidades compatibles (500 g + 1 kg → 1.5 kg), conserva lo tildado y deja agregar, editar o borrar ítems manuales eligiendo el rubro y con autocompletado del ingrediente.
 - **Historial**: guarda las semanas planificadas para consultarlas o repetirlas.
 - **Temas**: clásico, cool y oscuro, se eligen en Ajustes y se recuerdan en cada dispositivo.
 - **Cuenta obligatoria (nube)**: ingreso, registro, recuperación de contraseña y eliminación de cuenta. Sin sesión no se accede a los datos.
@@ -110,10 +110,10 @@ datos es solo metadata de autoría, sin FK.
 En **Ajustes → Hogar** se ve el nombre, los miembros y los links de invitación activos.
 “Crear link de invitación” genera una URL `#/unirse/<token>` válida 7 días y revocable; quien la
 abre inicia sesión (o crea una cuenta) y confirma que quiere unirse. Al unirse, sus datos se
-mueven al hogar compartido y su hogar anterior vacío se elimina. “Salir del hogar” deja los datos
-compartidos donde están y crea un hogar nuevo vacío **cuando queda otro miembro**; si sos el
-único, la UI bloquea la salida para no borrar todo por cascade (para cambiar de hogar se usa un
-link de invitación). Si el último miembro **borra su cuenta**, el hogar y sus datos sí se eliminan.
+mueven al hogar compartido y su hogar anterior vacío se elimina. “Salir del hogar” está en **Zona peligrosa**: deja los datos compartidos donde están y crea un
+hogar nuevo vacío **cuando queda otro miembro**; si sos el único, la opción directamente **no se
+muestra** (el hogar vacío se borraría con todos sus datos).
+Si el último miembro **borra su cuenta**, el hogar y sus datos sí se eliminan.
 
 ## Ideas para seguir
 

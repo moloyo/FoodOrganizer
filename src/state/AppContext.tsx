@@ -94,7 +94,7 @@ interface AppContextValue {
   regenerateShopping: () => Promise<void>
   toggleShopping: (id: string) => Promise<void>
   addShoppingItem: (text: string, category: string) => Promise<void>
-  updateShoppingItem: (id: string, text: string) => Promise<void>
+  updateShoppingItem: (id: string, text: string, category?: string) => Promise<void>
   deleteShoppingItem: (id: string) => Promise<void>
   clearCheckedShopping: () => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
@@ -678,8 +678,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [adapter, shopping, toast, weekStart])
 
   const updateShoppingItem = useCallback(
-    async (id: string, text: string) => {
-      const next = shopping.map((item) => (item.id === id ? { ...item, text } : item))
+    async (id: string, text: string, category?: string) => {
+      const next = shopping.map((item) =>
+        item.id === id ? { ...item, text, ...(category ? { category } : {}) } : item,
+      )
       setShopping(next)
       try {
         await adapter.replaceShopping(weekStart, next)
