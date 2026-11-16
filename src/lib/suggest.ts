@@ -1,4 +1,11 @@
-import type { DayMode, DayPlan, Dish, Ingredient, ShoppingItem } from '../types'
+import type {
+  DayMeals,
+  DayMode,
+  DayPlan,
+  Dish,
+  Ingredient,
+  ShoppingItem,
+} from '../types'
 import { CATEGORIES, DIFFICULTY_RANK, normalizeCategory } from './constants'
 import { formatIngredientName, normalizeIngredientName } from './ingredients'
 
@@ -61,25 +68,52 @@ export function pickSuggestion(
   return weightedPick(pool, mode)
 }
 
+export interface MealPick {
+  day: number
+  slot: number
+  dishId: string
+  mode: DayMode
+}
+
+/**
+ * "Sorpréndeme" para días con N comidas: llena **todas las secciones vacías**
+ * de la semana sin repetir platos. Las comidas ya planificadas cuentan como usadas.
+ */
+export function suggestMeals(dishes: Dish[], days: DayMeals[]): MealPick[] {
+  const used: string[] = []
+  const picks: MealPick[] = []
+  for (const day of days) {
+    for (const meal of day.meals) {
+      if (meal.dishId) {
+        used.push(meal.dishId)
+        continue
+      }
+      const mode = meal.mode ?? 'facil'
+      const dish = pickSuggestion(dishes, mode, { excludeIds: used })
+      if (dish) {
+        used.push(dish.id)
+        picks.push({ day: day.day, slot: meal.slot, dishId: dish.id, mode })
+      }
+    }
+  }
+  return picks
+}
+
+/** Versión de 1 comida por día (la que usa la app hoy). */
 export function suggestWeek(
   dishes: Dish[],
   days: DayPlan[],
 ): { day: number; dishId: string; mode: DayMode }[] {
-  const used: string[] = []
-  const picks: { day: number; dishId: string; mode: DayMode }[] = []
-  for (const day of days) {
-    if (day.dishId) {
-      used.push(day.dishId)
-      continue
-    }
-    const mode = day.mode ?? 'facil'
-    const dish = pickSuggestion(dishes, mode, { excludeIds: used })
-    if (dish) {
-      used.push(dish.id)
-      picks.push({ day: day.day, dishId: dish.id, mode })
-    }
-  }
-  return picks
+  const asDays: DayMeals[] = days.map((day) => ({
+    day: day.day,
+    note: day.note,
+    meals: [{ slot: 0, mode: day.mode, dishId: day.dishId }],
+  }))
+  return suggestMeals(dishes, asDays).map(({ day, dishId, mode }) => ({
+    day,
+    dishId,
+    mode,
+  }))
 }
 
 /* ------------------------------ Lista de compras ------------------------------ */
@@ -190,40 +224,50 @@ function displayQuantity(
   return { quantity: formatQty(total), unit: 'u' }
 }
 
-export function buildShoppingItems(days: DayPlan[], dishes: Dish[]): Omit<ShoppingItem, 'id'>[] {
+/**
+ * Arma la lista de compras recorriendo **todas** las comidas de todos los días.
+ * La unificación de nombres/unidades ya suma ingredientes que aparecen en varias
+ * comidas distintas.
+ */
+export function buildShoppingItemsForDays(
+  days: DayMeals[],
+  dishes: Dish[],
+): Omit<ShoppingItem, 'id'>[] {
   const groups = new Map<string, GroupedIngredient>()
 
   for (const day of days) {
-    if (!day.dishId) continue
-    const dish = dishes.find((d) => d.id === day.dishId)
-    if (!dish) continue
-    for (const ingredient of dish.ingredients) {
-      const name = ingredient.name.trim()
-      if (!name) continue
-      const unit = (ingredient.unit ?? '').trim()
-      const category = normalizeCategory(ingredient.category, name)
-      const info = unitInfo(unit)
-      // Los nombres y las unidades compatibles se unifican: "Queso" y "queso",
-      // "500 g" y "1 kg", "200 ml" y "1 cda". Las unidades libres quedan aparte.
-      const unitKey = info ? `dim:${info.dimension}` : `unit:${normalizeUnit(unit)}`
-      const key = `${category}|${normalizeIngredientName(name)}|${unitKey}`
-      const existing = groups.get(key)
-      if (existing) {
-        if (ingredient.qty.trim()) {
-          existing.quantities.push(ingredient.qty.trim())
-          existing.units.push(unit)
-          existing.unitInfos.push(info)
+    for (const meal of day.meals) {
+      if (!meal.dishId) continue
+      const dish = dishes.find((d) => d.id === meal.dishId)
+      if (!dish) continue
+      for (const ingredient of dish.ingredients) {
+        const name = ingredient.name.trim()
+        if (!name) continue
+        const unit = (ingredient.unit ?? '').trim()
+        const category = normalizeCategory(ingredient.category, name)
+        const info = unitInfo(unit)
+        // Los nombres y las unidades compatibles se unifican: "Queso" y "queso",
+        // "500 g" y "1 kg", "200 ml" y "1 cda". Las unidades libres quedan aparte.
+        const unitKey = info ? `dim:${info.dimension}` : `unit:${normalizeUnit(unit)}`
+        const key = `${category}|${normalizeIngredientName(name)}|${unitKey}`
+        const existing = groups.get(key)
+        if (existing) {
+          if (ingredient.qty.trim()) {
+            existing.quantities.push(ingredient.qty.trim())
+            existing.units.push(unit)
+            existing.unitInfos.push(info)
+          }
+        } else {
+          groups.set(key, {
+            name,
+            quantities: ingredient.qty.trim() ? [ingredient.qty.trim()] : [],
+            units: ingredient.qty.trim() ? [unit] : [],
+            unitInfos: ingredient.qty.trim() ? [info] : [],
+            unit,
+            category,
+            dishId: dish.id,
+          })
         }
-      } else {
-        groups.set(key, {
-          name,
-          quantities: ingredient.qty.trim() ? [ingredient.qty.trim()] : [],
-          units: ingredient.qty.trim() ? [unit] : [],
-          unitInfos: ingredient.qty.trim() ? [info] : [],
-          unit,
-          category,
-          dishId: dish.id,
-        })
       }
     }
   }
@@ -264,6 +308,21 @@ export function buildShoppingItems(days: DayPlan[], dishes: Dish[]): Omit<Shoppi
     const byCategory = (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99)
     return byCategory !== 0 ? byCategory : a.text.localeCompare(b.text, 'es')
   })
+}
+
+/** Compatibilidad: la app actual tiene 1 comida por día. */
+export function buildShoppingItems(
+  days: DayPlan[],
+  dishes: Dish[],
+): Omit<ShoppingItem, 'id'>[] {
+  return buildShoppingItemsForDays(
+    days.map((day) => ({
+      day: day.day,
+      note: day.note,
+      meals: [{ slot: 0, mode: day.mode, dishId: day.dishId }],
+    })),
+    dishes,
+  )
 }
 
 /** Conserva los tildados de la lista anterior al regenerar. */

@@ -143,12 +143,37 @@ de planes), ni `households`.
 
 ## 8. Plan de trabajo en la rama
 
-1. Confirmar este diseño con el **boceto visual** `docs/mockup-comidas.html` (HTML estático,
-   sin backend: tema clásico/cool/oscuro, "+", "✕" y chips interactivos).
-2. Tipos + lógica pura + tests (sin tocar Supabase ni la UI).
-3. Migración SQL + adaptador (cloud / local / offline).
-4. UI: `DayCard`, `WeekScreen`, `HistoryScreen`.
-5. Verificación local: `npm test`, `npm run test:e2e` (**los 6 tests deben seguir pasando sin
+1. [x] Confirmar este diseño con el **boceto visual** `docs/mockup-comidas.html` (HTML
+   estático, sin backend: tema clásico/cool/oscuro, "+", "✕" y chips interactivos).
+2. [x] **Tipos + lógica pura + tests** (sin tocar Supabase ni la UI). Ver §9.
+3. [ ] Migración SQL + adaptador (cloud / local / offline).
+4. [ ] UI: `DayCard`, `WeekScreen`, `HistoryScreen`.
+5. [ ] Verificación local: `npm test`, `npm run test:e2e` (**los 6 tests deben seguir pasando sin
    cambios**), `npm run build`.
-6. Verificación real con dos cuentas temporales en un **deploy de preview**, sin tocar `main`.
-7. Recién ahí: merge a `main`, aplicar migración y desplegar juntos.
+6. [ ] Verificación real con dos cuentas temporales en un **deploy de preview**, sin tocar `main`.
+7. [ ] Recién ahí: merge a `main`, aplicar migración y desplegar juntos.
+
+## 9. Etapa 2 implementada (solo lógica pura)
+
+**Archivos nuevos / modificados:**
+
+- `src/types.ts`: `MealEntry`, `DayMeals`, `MealPlanRow`; `PlanRow.slot` **opcional** para no
+  romper el código actual durante la transición.
+- `src/lib/meals.ts` (nuevo): `emptyMeal`, `emptyDay`, `compactMeals`, `addMeal`,
+  `removeMeal`, `setMeal`, `setDayNote`, `groupMealRows`, `flattenDay`.
+  - `removeMeal` nunca deja el día con 0 comidas; `compactMeals` normaliza huecos.
+  - `flattenDay` escribe la **nota solo en `slot = 0`**; `groupMealRows` la lee de ahí (con
+    fallback a la primera nota no vacía) y compacta los slots.
+- `src/lib/suggest.ts`:
+  - `buildShoppingItemsForDays(days: DayMeals[], dishes)` recorre día → comida → plato.
+    `buildShoppingItems` (1 comida por día) ahora delega en ella ⇒ **comportamiento idéntico**.
+  - `suggestMeals(dishes, days: DayMeals[])` llena todas las comidas vacías sin repetir platos
+    en la semana. `suggestWeek` delega en ella ⇒ **comportamiento idéntico**.
+- `tests/meals.test.ts` (nuevo): 19 tests de alta/baja de comidas, compactado de slots,
+  nota única, round-trip de filas, compras con 2 comidas y sugerencias sin repetir.
+
+**Verificación:** `npx tsc -b` limpio · `npm test` **63/63** · `npm run build` correcto ·
+`npm run test:e2e` **6/6** (sin cambiar ningún test de interfaz).
+
+**No se tocó:** Supabase, migraciones, adaptadores, `AppContext`, componentes ni pantallas.
+`main` sigue intacto.

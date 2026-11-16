@@ -47,6 +47,29 @@ export interface ShoppingItem {
 
 export interface PlanRow extends DayPlan {
   weekStart: string
+  /** Posición de la comida dentro del día. Opcional durante la transición a N comidas. */
+  slot?: number
+}
+
+/** Una comida dentro de un día: dificultad + un plato. La nota es del día, no de la comida. */
+export interface MealEntry {
+  slot: number
+  mode: DayMode | null
+  dishId: string | null
+}
+
+/** Un día con 1..N comidas y una sola nota. */
+export interface DayMeals {
+  day: number
+  meals: MealEntry[]
+  note: string
+}
+
+/** Fila plana de la base: cada comida es una fila. La nota vive en `slot = 0`. */
+export interface MealPlanRow extends MealEntry {
+  weekStart: string
+  day: number
+  note: string
 }
 
 export interface ShoppingRow extends ShoppingItem {
