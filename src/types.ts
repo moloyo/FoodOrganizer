@@ -165,6 +165,12 @@ export interface DataAdapter extends HouseholdAdapter {
   offline?: OfflineSupport
   getUser(): Promise<SessionUser | null>
   onAuthChange(cb: (user: SessionUser | null) => void): () => void
+  /**
+   * Se suscribe a cambios del hogar (Supabase Realtime). Devuelve la baja.
+   * El callback es solo una señal: quien lo recibe relee del servidor,
+   * no aplica deltas.
+   */
+  subscribeToChanges(onChange: () => void): () => void
   signIn(email: string, password: string): Promise<void>
   signUp(email: string, password: string): Promise<{ needsConfirmation: boolean }>
   signOut(): Promise<void>

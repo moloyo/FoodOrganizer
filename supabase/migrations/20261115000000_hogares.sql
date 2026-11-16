@@ -1,11 +1,11 @@
 -- ============================================================
---  Comidas · Migración "hogares" (datos compartidos por hogar)
---  Ejecutá este archivo COMPLETO en el SQL Editor de Supabase,
---  DESPUÉS de supabase/schema.sql.
+--  Comidas · Migración 20261115000000 "hogares"
+--  (datos compartidos por hogar)
 --
---  Es idempotente: se puede correr dos (o más) veces sin romper
---  ni duplicar hogares. Si se corre con psql, conviene envolverlo
---  en BEGIN/COMMIT para que la migración sea atómica.
+--  Orden: 20261113000000_schema.sql → esta → 20261116000000_comidas_por_dia.sql
+--  Con `supabase db push` el CLI lleva el registro de cuáles ya se
+--  aplicaron en `supabase_migrations.schema_migrations`. También se puede
+--  correr a mano en el SQL Editor (es idempotente).
 --
 --  ATENCIÓN PARA EL CLIENTE: a partir de acá las escrituras deben
 --  enviar household_id en cada insert/upsert, el unique de planes

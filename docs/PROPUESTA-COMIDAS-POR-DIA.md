@@ -95,7 +95,7 @@ las agrupa por `(weekStart, day)` y ordena por `slot`.
 
 | Archivo | Cambio |
 | --- | --- |
-| `supabase/migration_comidas_por_dia.sql` | Nueva: columna `slot`, nuevo unique. Idempotente. |
+| `supabase/migrations/20261116000000_comidas_por_dia.sql` | Nueva: columna `slot`, nuevo unique. Idempotente. |
 | `src/types.ts` | `MealEntry`, `DayMeals`; `PlanRow` suma `slot`; `Snapshot.version: 2`. |
 | `src/lib/adapters/cloud.ts` | Mapear `slot`, cambiar `onConflict`, enviar `slot` en inserts/upserts. |
 | `src/lib/adapters/local.ts` | Stub con `slot` para E2E. |
@@ -198,7 +198,7 @@ de planes), ni `households`.
 
 ## 10. Etapa 3 implementada (SQL + adaptadores, sin ejecutar nada)
 
-**`supabase/migration_comidas_por_dia.sql`** (nuevo, idempotente, **NO ejecutado**):
+**`supabase/migrations/20261116000000_comidas_por_dia.sql`** (nuevo, idempotente, **NO ejecutado**):
 
 ```sql
 alter table public.plans add column if not exists slot smallint not null default 0;

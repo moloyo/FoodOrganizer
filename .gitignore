@@ -12,3 +12,5 @@ playwright-report
 dev-dist
 
 .vercel
+supabase/.temp/
+.supabase/

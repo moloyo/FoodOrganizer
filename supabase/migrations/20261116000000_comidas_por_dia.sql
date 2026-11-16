@@ -1,10 +1,10 @@
 -- ============================================================
---  Comidas · Migración "N comidas por día"
+--  Comidas · Migración 20261116000000 "N comidas por día"
 --
---  Ejecutá este archivo COMPLETO en el SQL Editor de Supabase,
---  DESPUÉS de schema.sql y de migration_hogares.sql.
---
---  Es idempotente: se puede correr dos veces sin romper nada.
+--  Orden: 20261113000000_schema.sql → 20261115000000_hogares.sql → esta.
+--  Con `supabase db push` el CLI registra cuáles ya se aplicaron en
+--  `supabase_migrations.schema_migrations`. También se puede correr a mano
+--  en el SQL Editor (es idempotente).
 --
 --  SEGURIDAD DE DESPLIEGUE: el cliente nuevo omite la columna `slot`
 --  mientras todas las comidas de un día sean la primera, así que funciona

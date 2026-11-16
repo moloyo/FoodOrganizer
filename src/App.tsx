@@ -48,7 +48,10 @@ function ConfigMissing() {
             <li>
               Completá <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code>.
             </li>
-            <li>Ejecutá <code>supabase/schema.sql</code> en el SQL Editor de Supabase.</li>
+            <li>
+              Aplicá las migraciones: <code>npx supabase link --project-ref &lt;ref&gt;</code> y
+              <code>npm run db:push</code> (o los SQL de <code>supabase/migrations/</code> en orden).
+            </li>
             <li>Reiniciá el servidor de desarrollo y creá tu cuenta.</li>
           </ol>
         </div>

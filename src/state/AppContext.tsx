@@ -38,6 +38,7 @@ import {
   setDayNote as setDayNoteOnDay,
   setMeal as setMealOnDay,
 } from '../lib/meals'
+import { shouldRefreshFromRealtime } from '../lib/realtime'
 import {
   buildShoppingItemsForDays,
   matchesMode,
@@ -375,6 +376,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const retrySync = useCallback(() => {
     void adapter.offline?.flush()
   }, [adapter])
+
+  /* --------------------------- Realtime (hogar) --------------------------- */
+
+  // Ref para no resuscribirnos cada vez que cambia el estado de la cola.
+  const offlineRef = useRef(offlineStatus)
+  useEffect(() => {
+    offlineRef.current = offlineStatus
+  }, [offlineStatus])
+
+  useEffect(() => {
+    if (!user) return
+    let timer: number | undefined
+    const unsubscribe = adapter.subscribeToChanges(() => {
+      if (!shouldRefreshFromRealtime(offlineRef.current)) return
+      // Agrupamos ráfagas de escrituras en una sola releída.
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        void reloadAll().catch(() => {})
+        void adapter
+          .listShopping(weekStart)
+          .then(setShopping)
+          .catch(() => {})
+        void refreshHousehold().catch(() => {})
+      }, 350)
+    })
+    return () => {
+      window.clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [adapter, refreshHousehold, reloadAll, user?.id, user?.householdId, weekStart])
 
   /* ------------------------------- Derivados ------------------------------- */
 

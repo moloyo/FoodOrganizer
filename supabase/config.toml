@@ -1,0 +1,8 @@
+# Configuración local de Supabase CLI.
+# El `project_ref` real NO se versiona: se vincula con
+#   npx supabase link --project-ref <ref>
+# usando el ref que aparece en VITE_SUPABASE_URL (.env.local, gitignored).
+project_id = "comidas"
+
+[db]
+major_version = 15

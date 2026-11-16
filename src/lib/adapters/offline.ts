@@ -550,6 +550,12 @@ export function createOfflineAdapter(
       })
     },
 
+    subscribeToChanges(onChange) {
+      // Realtime no pasa por la caché: el callback dispara una releída normal,
+      // que sí actualiza la caché si la red está disponible.
+      return base.subscribeToChanges(onChange)
+    },
+
     async signIn(email, password) {
       await base.signIn(email, password)
     },

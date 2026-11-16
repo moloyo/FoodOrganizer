@@ -86,6 +86,11 @@ export function createLocalAdapter(): DataAdapter {
       return () => {}
     },
 
+    subscribeToChanges() {
+      // En modo local (solo tests) no hay Realtime.
+      return () => {}
+    },
+
     async signIn() {
       throw new Error('Estás en modo local. Configurá Supabase para usar cuentas.')
     },

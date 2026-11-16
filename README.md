@@ -44,10 +44,19 @@ pantalla de “Falta configurar Supabase” en lugar de abrir un modo local.
 ### Configurar Supabase
 
 1. Creá un proyecto gratis en [supabase.com](https://supabase.com).
-2. Abrí **SQL Editor** y ejecutá en orden [`supabase/schema.sql`](supabase/schema.sql),
-   [`supabase/migration_hogares.sql`](supabase/migration_hogares.sql) y
-   [`supabase/migration_comidas_por_dia.sql`](supabase/migration_comidas_por_dia.sql).
-   La última agrega la columna `slot` para varias comidas por día.
+2. Aplicá las migraciones versionadas con el CLI de Supabase (el CLI lleva el
+   registro de cuáles ya se aplicaron):
+
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref>       # el ref está en la URL del proyecto
+   npm run db:push                            # aplica solo las pendientes, en orden
+   ```
+
+   También podés correr los tres archivos de [`supabase/migrations/`](supabase/migrations/)
+   a mano en el SQL Editor (son idempotentes). Ver
+   [`supabase/migrations/README.md`](supabase/migrations/README.md) para el
+   *baseline* de una base que ya estaba migrada a mano.
 3. En **Project Settings → API**, copiá `Project URL` y `anon public key`.
 4. Creá `.env.local` a partir de `.env.example`:
 
@@ -126,6 +135,25 @@ el recetario es el mismo para todas.
 El default es **una comida por día**, así que la app se ve igual que siempre hasta que agregás
 otra. "Sorpréndeme" llena todas las comidas vacías sin repetir platos en la semana, y la lista
 de compras suma los ingredientes de todas.
+
+## Sincronización en tiempo real
+
+Los miembros de un hogar se avisan los cambios por **Supabase Realtime** (broadcast por hogar).
+Cuando alguien guarda algo, los demás —y sus otras pestañas— **releen del servidor** sin tener
+que recargar. La señal no lleva datos: cada cliente consulta con su propia sesión, así que el
+RLS sigue mandando. Si hay cambios pendientes en la cola offline, el refresco se posterga para
+no pisarlos. No requiere ninguna configuración extra en Supabase.
+
+## Migraciones versionadas
+
+Los SQL viven en [`supabase/migrations/`](supabase/migrations/) con timestamp y el CLI registra
+cuáles ya se aplicaron en `supabase_migrations.schema_migrations`:
+
+```bash
+npm run db:status   # qué falta
+npm run db:dry      # vista previa
+npm run db:push     # aplica solo las pendientes
+```
 
 ## Ideas para seguir
 

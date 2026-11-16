@@ -661,8 +661,9 @@ export function SettingsScreen() {
               <ol className="mt-2 list-decimal space-y-1 pl-4 text-[11.5px] leading-relaxed text-muted">
                 <li>Creá un proyecto gratis en supabase.com.</li>
                 <li>
-                  En el SQL Editor, ejecutá el archivo <code>supabase/schema.sql</code> del
-                  proyecto.
+                  Aplicá las migraciones con <code>npx supabase link --project-ref &lt;ref&gt;</code>{' '}
+                  y <code>npm run db:push</code> (o los SQL de{' '}
+                  <code>supabase/migrations/</code> en orden).
                 </li>
                 <li>
                   Copiá la URL y la anon key a <code>.env.local</code> (usá{' '}

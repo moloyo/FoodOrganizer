@@ -1,7 +1,9 @@
 -- ============================================================
---  Comidas · esquema para Supabase
---  Ejecutá este archivo completo en el SQL Editor del proyecto.
---  Es idempotente: podés correrlo más de una vez.
+--  Comidas · Migración 20261113000000 "schema base"
+--
+--  Es la primera de la serie. Con `supabase db push` el CLI registra
+--  cuáles ya se aplicaron en `supabase_migrations.schema_migrations`.
+--  También se puede correr a mano en el SQL Editor (es idempotente).
 -- ============================================================
 
 create extension if not exists pgcrypto;

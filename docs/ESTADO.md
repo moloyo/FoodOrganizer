@@ -110,7 +110,7 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   revocación de links de invitación y “Salir del hogar”.
 - **Links de invitación** `#/unirse/<uuid>`: vencen a los 7 días, son revocables y reutilizables.
   Quien los abre inicia sesión o crea una cuenta y confirma la unión en `InviteScreen`.
-- **Migración de datos**: `supabase/migration_hogares.sql` crea `households`,
+- **Migración de datos**: `supabase/migrations/20261115000000_hogares.sql` crea `households`,
   `household_members` y `household_invites`, agrega `household_id` a las tres tablas, migra las
   filas existentes sin perder nada y cambia el RLS a `is_household_member(household_id)`.
 - **Salir del hogar**: vive en **Zona peligrosa** y solo se muestra cuando queda otro miembro.
@@ -133,13 +133,19 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   esa operación.
 - **Cuenta obligatoria:** sin variables de Supabase la app muestra “Falta configurar Supabase”;
   `VITE_E2E_LOCAL=1` solo tiene efecto junto con `--mode e2e`.
-- `supabase/schema.sql` (base) + `supabase/migration_hogares.sql` (hogares, RLS por membresía y
-  `delete_my_account()` adaptado). El cliente resuelve el hogar con `my_household()` y guarda un
-  fallback en `comidas:household:v1:<userId>` para arrancar offline.
-- PWA con manifest, íconos, service worker y precache.
-- **Tests con Vitest** (67 tests en 9 archivos): fechas, rubros, sugerencias, unidades de
-  compras e ingredientes, más el modo de la app, el adaptador offline (por hogar), los links
-  de invitación, la regla de salida del hogar y la lógica de N comidas por día.
+- **Realtime entre miembros del hogar:** `DataAdapter.subscribeToChanges()` abre un canal
+  `comidas:hh:<householdId>` de Supabase Realtime Broadcast. Después de cada escritura exitosa
+  se manda una señal sin datos; quien la recibe **relee del servidor** con debounce de 350 ms.
+  `shouldRefreshFromRealtime()` evita pisar la cola offline. No requiere SQL extra.
+- **Migraciones versionadas:** `supabase/migrations/<timestamp>_*.sql` + `supabase/config.toml`.
+  El CLI de Supabase registra las aplicadas en `supabase_migrations.schema_migrations`;
+  `npm run db:status` / `db:dry` / `db:push` / `db:migrations`. Los tres SQL siguen siendo
+  idempotentes y se pueden correr a mano. Baseline documentado en
+  [`supabase/migrations/README.md`](supabase/migrations/README.md).
+- **Tests con Vitest** (74 tests en 11 archivos): fechas, rubros, sugerencias, unidades de
+  compras e ingredientes, modo de la app, adaptador offline por hogar, links de invitación,
+  regla de salida del hogar, N comidas por día, guardias de Realtime y validación de
+  migraciones.
 - **Tests de interfaz con Playwright** (8 flujos críticos).
 - Repositorio git inicializado con historial (`main`).
 - README en español con setup y deploy.
@@ -216,9 +222,9 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   nuevo correspondiente; en el editor de platos también se normalizan al abrir y al guardar.
   Sin errores de consola.
 - Sin errores de página/consola en las pruebas realizadas.
-- **Tests automatizados (16/11/2026):** `npm test` corre **67 tests en 9 archivos**:
-  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline`, `invite`, `household`
-  y `meals`. Cubren conversión de unidades, unificación de nombres, preservación de
+- **Tests automatizados (16/11/2026):** `npm test` corre **74 tests en 11 archivos**:
+  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline`, `invite`, `household`,
+  `meals`, `realtime` y `migrations`. Cubren conversión de unidades, unificación de nombres, preservación de
   tildados/manuales, búsqueda tolerante a errores de tipeo, cuenta obligatoria/modo de test,
   caché de lectura, cola de escrituras por hogar (aislamiento, cola compartida y `rescope`),
   compactación, descarte de errores que no son de red, parseo/armado de links de invitación,
@@ -260,9 +266,13 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   `anon` vio `[]`; un `insert` con `household_id` ajeno fue rechazado (`403`); el unique
   `(día, slot)` devolvió `409` al duplicar; `delete_my_account` respondió 204 en ambas cuentas
   y los datos compartidos sobrevivieron al borrar la primera. Sin tocar la cuenta principal.
-- **Rama `feature/multi-platos` (16/11/2026):** `npm test` **67/67**, `npm run test:e2e`
-  **8/8** (los 6 anteriores sin cambios + 2 de N comidas), `tsc` limpio y build correcto.
-  Boceto visual revisado en los 3 temas. Deploy en producción sin ventana de caída.
+- **Realtime + migraciones (16/11/2026):** `npm run db:migrations` lista 3 versiones con
+  timestamp válido, único y ordenado; `tests/migrations.test.mjs` y `tests/realtime.test.ts`
+  cubren baseline, duplicados, orden, guardia de refresco y broadcast propio. `npm test`
+  **74/74**, `npm run test:e2e` **8/8**, `tsc` limpio, build correcto.
+- **Rama `feature/multi-platos` (16/11/2026):** `npm test` **67/67** en su momento,
+  `npm run test:e2e` **8/8** (los 6 anteriores sin cambios + 2 de N comidas), `tsc` limpio y
+  build correcto. Boceto visual revisado en los 3 temas. Deploy en producción sin ventana de caída.
 - **Cuenta obligatoria (15/11/2026):** sin credenciales de Supabase la app muestra “Falta
   configurar Supabase” (no hay modo local para usuarios). `resolveAppMode` solo acepta
   `e2e-local` con `--mode e2e` **y** `VITE_E2E_LOCAL=1`; los tests cubren los tres casos.
@@ -297,8 +307,11 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conflictos: la
   última escritura que llega gana. Con dos personas editando la misma semana a la vez, un
   `replaceShopping` puede pisar la lista del otro.
-- **No hay sincronización en tiempo real.** Otro dispositivo (o el de tu pareja) ve los cambios
-  al recargar.
+- **Realtime es "refresco", no aplicación de deltas.** Ante un cambio del hogar se relee del
+  servidor con 350 ms de debounce; dos personas editando lo mismo a la vez siguen resolviéndose
+  por "última escritura gana". Si hay cambios en la cola offline, el refresco se posterga.
+  Realtime usa Broadcast (no `postgres_changes`): el canal va por `householdId`, el aviso no
+  lleva datos y no requiere publicación en la base.
 - **`household_join` mueve los datos del hogar origen.** Para una cuenta nueva es inocuo, pero
   si alguien con datos deja un hogar compartido uniéndose a otro, se lleva esos datos; “Salir del
   hogar” en cambio los deja.
@@ -340,22 +353,10 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
 - [ ] Reemplazar los 20 platos de ejemplo por recetas reales (o crear las propias y borrar los
       ejemplos). Por decisión tuya, hoy se mantienen los ejemplos.
 
-### Por decidir
-
-Dos ideas técnicas de la lista anterior, explicadas en criollo:
-
-- **Sincronización en tiempo real (Supabase Realtime).** Hoy, si el otro miembro del hogar
-  cambia un plato, vos lo ves **solo al recargar**. Realtime permite suscribirse a los cambios
-  de las tablas y reflejarlos en pantalla al instante, sin recargar. Costo: manejar
-  suscripciones, reconexiones y la convivencia con la cola offline; no aporta nada cuando no
-  hay red. Es una mejora de comodidad, no corrige un error.
-- **Migraciones SQL versionadas.** Hoy los tres archivos (`schema.sql`,
-  `migration_hogares.sql`, `migration_comidas_por_dia.sql`) se corren **a mano** en el SQL
-  Editor, en orden, y no queda registro de cuáles ya se aplicaron. Versionarlas significa
-  numerarlas y guardar en la base una tabla con las ya ejecutadas, para poder levantar el
-  proyecto en otra máquina o en un segundo entorno de una sola pasada y saber siempre en qué
-  versión está. Es mantenimiento interno: no se ve en la app.
-
+> Actualizado el 16/11: las dos ideas técnicas que quedaban ("Por decidir") ya están
+> **implementadas y desplegadas**: Realtime por hogar y migraciones versionadas con el CLI de
+> Supabase. Ver "Qué está hecho → Base técnica" y la bitácora.
+>
 > El resto de las ideas de la lista anterior (fotos, cantidad de comensales, "ya lo cociné",
 > recordatorios, atajos de PWA, cambio de email, excluir recetas) se descartaron por decisión
 > del usuario.
@@ -479,7 +480,7 @@ Dos ideas técnicas de la lista anterior, explicadas en criollo:
 - **Normalizar ingredientes:** acción en Ajustes que reescribe nombres y rubros viejos en todos
   los platos; informa cuántos cambió.
 - **Cuenta:** recuperación de contraseña (link + pantalla nueva) y eliminación de cuenta con
-  doble confirmación. `supabase/schema.sql` incorpora `delete_my_account()`
+  doble confirmación. `supabase/migrations/20261113000000_schema.sql` incorpora `delete_my_account()`
   (`security definer`, borra `auth.users` y cae en cascada).
 - **`recovery.ts`:** detecta `type=recovery` en el primer arranque y lo guarda en
   `sessionStorage`, porque Supabase puede limpiar el hash antes de montar React.
@@ -558,7 +559,7 @@ Dos ideas técnicas de la lista anterior, explicadas en criollo:
 
 - **Decisión del usuario:** todo compartido (platos, semana, compras e historial), un hogar por
   usuario, link de invitación, todos editan todo y migrar los datos existentes sin pérdida.
-- **Schema:** `supabase/migration_hogares.sql` (idempotente) crea `households`,
+- **Schema:** `supabase/migrations/20261115000000_hogares.sql` (idempotente) crea `households`,
   `household_members` y `household_invites`, agrega `household_id` a las 3 tablas, hace backfill
   de las cuentas existentes, cambia el unique de `plans` y reemplaza las policies por
   `is_household_member(household_id)`. `user_id` queda nullable y sin FK para que borrar una
@@ -634,3 +635,26 @@ Dos ideas técnicas de la lista anterior, explicadas en criollo:
   `npm run test:e2e` 8/8. **Migración aplicada en Supabase y deploy en producción el 16/11**;
   verificación con dos cuentas temporales detallada más arriba. Queda que lo pruebes con
   tu pareja en dos dispositivos.
+
+### 2026-11-16 · Realtime y migraciones versionadas
+
+- **Pedido:** implementar las dos ideas técnicas que quedaban pendientes (P2 16 y 17) y
+  depurar el resto de la lista de ideas.
+- **Realtime (16):** `DataAdapter.subscribeToChanges()`; `cloud.ts` abre un canal Broadcast
+  `comidas:hh:<householdId>` y avisa después de cualquier escritura exitosa (envoltorio
+  centralizado, sin datos en el payload). `AppContext` relee del servidor con debounce de
+  350 ms y `src/lib/realtime.ts` evita pisar la cola offline. Local/offline delegan o no-op.
+  Sin SQL extra: Broadcast no requiere publicación. Si Realtime falla, la app sigue igual.
+- **Migraciones (17):** los 3 SQL se renombraron a
+  `supabase/migrations/<timestamp>_*.sql` con `supabase/config.toml`; el CLI de Supabase
+  (`devDependency`) registra las aplicadas en `supabase_migrations.schema_migrations`.
+  Scripts `db:status` / `db:dry` / `db:push` / `db:migrations`,
+  `scripts/migrations.mjs` (valida nombres/orden y arma el baseline) y
+  [`supabase/migrations/README.md`](supabase/migrations/README.md) con el comando
+  `supabase migration repair ... --status applied --remote` para la base ya migrada a mano.
+- **Tests:** `tests/realtime.test.ts` (3) y `tests/migrations.test.mjs` (4); `vitest.config.ts`
+  acepta `.test.mjs`. `npm test` **74/74**, `npm run test:e2e` **8/8**, `tsc` limpio, build correcto.
+- **Documentación:** README, `DESARROLLO.md` y `ESTADO.md` actualizados; todas las
+  referencias a los SQL viejos redirigidas a `supabase/migrations/`.
+- **Pendiente (usuario):** correr el *baseline* del CLI una vez (`npm run db:migrations`
+  imprime el comando) para que el historial remoto refleje las 3 migraciones ya aplicadas.

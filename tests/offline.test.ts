@@ -65,6 +65,7 @@ function stubAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
     kind: 'cloud',
     getUser: async () => null,
     onAuthChange: () => () => {},
+    subscribeToChanges: () => () => {},
     signIn: fail,
     signUp: fail,
     signOut: async () => {},

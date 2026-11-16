@@ -10,9 +10,9 @@
 3. Iniciá el servidor: `npm run dev` → <http://localhost:5173>.
 4. Sin `.env.local` la app muestra **“Falta configurar Supabase”**: no hay modo local para
    usuarios reales (solo para los tests de Playwright).
-5. En el SQL Editor de Supabase corrieron `schema.sql`, `migration_hogares.sql` y
-   `migration_comidas_por_dia.sql` (en ese orden); sin la última el modelo de N comidas
-   por día no está disponible.
+5. Las migraciones se aplican con el CLI: `npx supabase link --project-ref <ref>` y
+   `npm run db:push` (o los SQL de `supabase/migrations/` a mano). Ver
+   [`supabase/migrations/README.md`](supabase/migrations/README.md).
 6. Antes de cambiar código, confirmá que compila: `npm run build`.
 7. Leé [`ESTADO.md`](ESTADO.md) para saber qué está hecho y qué sigue.
 
@@ -71,9 +71,15 @@ Playwright tenga un backend efímero y no pueda activarse en una build de produc
 ### Modo nube (Supabase)
 
 1. Crear proyecto en Supabase.
-2. Ejecutar completo `supabase/schema.sql` y **después** `supabase/migration_hogares.sql`
-   en el **SQL Editor** (en ese orden; ambos son idempotentes). Si se vuelve a correr
-   `schema.sql`, hay que re-correr la migración: restaura las policies viejas.
+2. Aplicar las migraciones versionadas (el CLI registra cuáles ya se aplicaron):
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref>
+   npm run db:push
+   ```
+   También se pueden correr los SQL de `supabase/migrations/` a mano en el SQL Editor,
+   **en orden de timestamp** (los tres son idempotentes). No vuelvas a correr el schema
+   base sobre una base ya migrada: restaura las policies viejas.
 3. Copiar `.env.example` a `.env.local` y completar:
    ```bash
    VITE_SUPABASE_URL=https://xxxxx.supabase.co
@@ -151,7 +157,33 @@ dos cosas, siempre **por hogar** (`scopeFromUser`: `householdId` si existe, si n
 
 La cola y la caché viven en el dispositivo: si se borran los datos del navegador antes de
 sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conflictos (gana la
-última escritura que llega) ni sincronización en tiempo real.
+última escritura que llega).
+
+### Realtime entre miembros del hogar
+
+- `DataAdapter.subscribeToChanges(cb)` devuelve la baja. En `cloud.ts` se abre un canal
+  `comidas:hh:<householdId>` de **Supabase Realtime Broadcast**: después de cualquier
+  escritura exitosa se envía una señal `{ from: instanceId }` (sin datos).
+- Quien recibe la señal **relee del servidor** (platos, planes, compras y datos del hogar);
+  no se aplican deltas, así que el RLS y la caché offline siguen siendo la fuente de verdad.
+- `instanceId` es por pestaña: las otras pestañas del mismo usuario también refrescan; la
+  propia se ignora con `isOwnBroadcast()`.
+- `AppContext` agrupa las señales con un debounce de 350 ms y **no refresca si hay cambios
+  pendientes o una sincronización en curso** (`shouldRefreshFromRealtime()`), para no pisar
+  escrituras optimistas.
+- La suscripción se rehace al cambiar de sesión, de hogar o de semana. Si Realtime falla, la
+  app sigue funcionando igual (recargando a mano).
+- Broadcast no requiere publicación ni RLS especial en la base; el payload no lleva datos,
+  solo el aviso de que algo cambió.
+
+### Migraciones versionadas
+
+- `supabase/migrations/<timestamp>_*.sql` + `supabase/config.toml`. El CLI lleva el registro
+  en `supabase_migrations.schema_migrations`; `npm run db:push` aplica solo las pendientes.
+- `npm run db:status`, `npm run db:dry`, `npm run db:migrations`. Detalle y *baseline* en
+  [`supabase/migrations/README.md`](supabase/migrations/README.md).
+- `scripts/migrations.mjs` valida nombres/orden y genera el comando de baseline; cubierto por
+  `tests/migrations.test.mjs`.
 
 ### Hogares e invitaciones
 
@@ -199,7 +231,7 @@ sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conf
   comidas vacías sin repetir platos. Las versiones de 1 comida por día delegan en ellas.
 - **`DataAdapter`**: `listMealPlans()` y `replaceDayMeals(week, day, rows)`. El offline
   usa la clave de caché `mealPlans` y la operación de cola `replaceDayMeals`.
-- **Migración:** `supabase/migration_comidas_por_dia.sql` agrega `slot smallint not null
+- **Migración:** `supabase/migrations/20261116000000_comidas_por_dia.sql` agrega `slot smallint not null
   default 0` y cambia el unique a `(household_id, week_start, day, slot)`. Sin backfill.
   El cliente omite `slot` mientras todas las comidas sean la primera, así que se puede
   desplegar antes de aplicar la migración, sin ventana de caída.
@@ -312,11 +344,11 @@ Comidas/
 │     ├─ ResetPasswordScreen.tsx # Contraseña nueva desde el link de recovery
 │     └─ InviteScreen.tsx      # Confirmación para unirse a un hogar
 ├─ index.html                  # Script que aplica el tema antes del primer render
-├─ supabase/schema.sql         # Tablas base + RLS + delete_my_account()
-├─ supabase/migration_hogares.sql # Hogares, membresías, invitaciones y RLS por hogar
-├─ supabase/migration_comidas_por_dia.sql # Columna `slot` y unique por (día, slot)
-├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite, household, meals)
-├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas)
+├─ supabase/config.toml        # Config del CLI de Supabase
+├─ supabase/migrations/        # SQL versionados por timestamp (ver README.md ahí)
+├─ scripts/migrations.mjs      # Lista/valida versiones y arma el baseline
+├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite, household, meals, realtime, migrations)
+├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas, N comidas)
 ├─ tests/e2e/env/.env          # Entorno de test (VITE_E2E_LOCAL=1) para forzar el modo local
 ├─ vitest.config.ts            # Configuración de Vitest
 ├─ playwright.config.ts        # Configuración de Playwright (Chrome instalado)
@@ -563,7 +595,7 @@ mostrarse y al editar el plato.
 ### Agregar un campo a `Dish`
 
 Checklist: `types.ts` → `DishEditor` (form) → `DishDetail` (lectura) → mapeos en
-`adapters/cloud.ts` (`DishRow`, `mapDish`, `toDishRow`) → `supabase/schema.sql`
+`adapters/cloud.ts` (`DishRow`, `mapDish`, `toDishRow`) → `supabase/migrations/20261113000000_schema.sql`
 (columna + `alter table` si ya existe la tabla) → seed si aplica.
 
 ### Cambiar las reglas de sugerencia
@@ -587,6 +619,8 @@ Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, rev
 | `tests/invite.test.ts` | Parseo del token en el hash y armado del link de invitación. |
 | `tests/household.test.ts` | Bloqueo de “Salir del hogar” cuando hay un solo miembro. |
 | `tests/meals.test.ts` | N comidas por día: alta/baja, slots, nota única, compras y sugerencias. |
+| `tests/realtime.test.ts` | Guardia de refresco (no pisar la cola offline) y detección de broadcast propio. |
+| `tests/migrations.test.mjs` | Nombres/orden de las migraciones, duplicados y comando de baseline. |
 
 Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
 necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
@@ -680,9 +714,11 @@ propósito.
   (**Authentication → URL Configuration**: Site URL y Redirect URLs) para confirmación de email y
   recuperación de contraseña. Los links de invitación usan el mismo dominio (`#/unirse/<token>`),
   así que no requieren una Redirect URL extra.
-- **Migración de hogares aplicada el 15/11/2026.** `supabase/migration_hogares.sql` y el cliente
-  nuevo se desplegaron juntos. Si en el futuro se vuelve a correr `schema.sql`, hay que
-  re-correr la migración (restaura las policies viejas). Schema y cliente siempre van juntos.
+- **Migraciones:** antes de desplegar un cambio de schema, `npm run db:push`. El CLI aplica
+  solo las pendientes; `npm run db:status` muestra en qué versión está el remoto. Schema y
+  cliente siempre van juntos (hay una ventana breve si el cambio no es compatible hacia atrás).
+- **Realtime:** no requiere configuración extra en Supabase (usa Broadcast). No hay que
+  habilitar publicaciones ni tocar `realtime.messages`.
 - **Deploy actual:** <https://comidas-pi.vercel.app> (proyecto `comidas`, conectado a
   `moloyo/FoodOrganizer`). Para redesplegar: `npx vercel --prod`. Es la URL canónica: Site URL
   y Redirect URLs de Supabase ya apuntan acá (`comidas-pi.vercel.app/**`); el proyecto
@@ -707,8 +743,10 @@ propósito.
 | Cambios que no aparecen | Service worker con caché vieja: recargá o “Actualizar” en el navegador. |
 | El puerto 5173 está ocupado | Cerrá el proceso de Vite anterior o usá `--strictPort` para ver el error. |
 | Error `null value in column "note"` al guardar un día | Corregido: la app ahora manda `''`. Recargá con `Ctrl+Shift+R` para cargar el adaptador nuevo. |
-| “Falta actualizar el schema…” al eliminar la cuenta o “Falta aplicar la migración de hogares…” | Ejecutá `supabase/schema.sql` y después `supabase/migration_hogares.sql` en el SQL Editor. |
-| `null value in column "household_id"` o `could not find the function my_household` | Corriste el cliente nuevo sin la migración (o al revés). Aplicá `migration_hogares.sql`. |
+| “Falta actualizar el schema…” al eliminar la cuenta o “Falta aplicar la migración de hogares…” | Ejecutá `npm run db:push` (o los SQL de `supabase/migrations/` en orden). |
+| `null value in column "household_id"` o `could not find the function my_household` | Corriste el cliente nuevo sin la migración (o al revés). Aplicá `npm run db:push`. |
+| `npm run db:push` muestra migraciones pendientes en una base ya migrada a mano | Falta el *baseline*: `npm run db:migrations` te da el comando `supabase migration repair ... --status applied --remote`. |
+| Los cambios del otro miembro no aparecen al instante | Realtime funciona por Broadcast con el canal del hogar; revisá que ambos estén en el mismo `householdId` y que no haya cambios pendientes en la cola offline (el refresco se posterga). Recargar siempre funciona. |
 | Dos usuarios no se ven los datos | Verificá que ambos estén en el mismo `household_id` (`select * from household_members`) y que el link no haya vencido. |
 | El link de invitación no abre la pantalla de unión | Revisá que el hash sea `#/unirse/<uuid>` y que `main.tsx` importe `captureInvite()` antes de montar React. |
 | El link de recuperación abre la app pero no la pantalla nueva | Verificá `type=recovery` en la URL y que `src/lib/recovery.ts` se importe antes que `App` en `main.tsx`. |

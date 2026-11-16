@@ -16,6 +16,7 @@ import type {
   Snapshot,
 } from '../../types'
 import { isUuid, newUuid } from '../uuid'
+import { isOwnBroadcast } from '../realtime'
 import { isOfflineError } from './offline'
 
 interface DishRow {
@@ -145,7 +146,7 @@ function migrationHint(error: { message?: string; code?: string }): Error {
     /schema cache/i.test(message)
   ) {
     return new Error(
-      'Falta aplicar la migración de hogares: ejecutá supabase/migration_hogares.sql en el SQL Editor de Supabase.',
+      'Faltan las migraciones de Supabase: ejecutá npm run db:push (o los SQL de supabase/migrations/ en orden).',
     )
   }
   return new Error(message)
@@ -223,6 +224,28 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
 
   /** Sesión ya resuelta con su hogar; se invalida al entrar/salir de uno. */
   let cachedSession: { userId: string; user: SessionUser } | null = null
+
+  /* --------------------------- Realtime (hogar) --------------------------- */
+
+  /** Identifica esta pestaña: otras pestañas del MISMO usuario sí deben refrescar. */
+  const instanceId = `comidas-${Math.random().toString(36).slice(2, 10)}`
+  let broadcastChannel: ReturnType<SupabaseClient['channel']> | null = null
+
+  /**
+   * Avisa a los demás miembros del hogar que algo cambió. No enviamos datos:
+   * solo una señal, y cada cliente relee del servidor con su propia sesión.
+   * Broadcast no requiere publicación ni RLS especial en la base.
+   */
+  function notifyChange(): void {
+    if (!broadcastChannel) return
+    void Promise.resolve(
+      broadcastChannel.send({
+        type: 'broadcast',
+        event: 'changed',
+        payload: { from: instanceId },
+      }),
+    ).catch(() => {})
+  }
 
   function invalidateSession(): void {
     cachedSession = null
@@ -337,7 +360,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     if (error) throw new Error(error.message)
   }
 
-  return {
+  const adapter: DataAdapter = {
     kind: 'cloud',
 
     async getUser() {
@@ -403,7 +426,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
           /function .* does not exist/i.test(error.message)
         ) {
           throw new Error(
-            'Falta actualizar el schema de Supabase: ejecutá supabase/migration_hogares.sql para habilitar el borrado de cuenta.',
+            'Falta actualizar el schema de Supabase: ejecutá npm run db:push para habilitar el borrado de cuenta.',
           )
         }
         throw new Error(error.message)
@@ -691,7 +714,59 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       const { error } = await client.from('dishes').delete().eq('household_id', householdId)
       if (error) throw new Error(error.message)
     },
+
+    subscribeToChanges(onChange) {
+      let cancelled = false
+      let channel: ReturnType<SupabaseClient['channel']> | null = null
+      void (async () => {
+        try {
+          const { data } = await client.auth.getSession()
+          if (data.session?.access_token) {
+            client.realtime.setAuth(data.session.access_token)
+          }
+          const user = await resolveSession()
+          if (cancelled || !user?.householdId) return
+          channel = client
+            .channel(`comidas:hh:${user.householdId}`)
+            .on('broadcast', { event: 'changed' }, (payload) => {
+              const from = (payload.payload as { from?: unknown } | undefined)?.from
+              if (!isOwnBroadcast(from, instanceId)) onChange()
+            })
+            .subscribe()
+          broadcastChannel = channel
+        } catch {
+          // Realtime es una mejora: si falla, la app sigue funcionando igual.
+        }
+      })()
+      return () => {
+        cancelled = true
+        if (channel) {
+          if (broadcastChannel === channel) broadcastChannel = null
+          void client.removeChannel(channel)
+        }
+      }
+    },
   }
+
+  // Después de CUALQUIER escritura exitosa avisamos al hogar. Centralizado
+  // acá para no tener que acordarse de llamarlo en cada método nuevo.
+  const WRITES = [
+    'deleteAccount', 'renameHousehold', 'createHouseholdInvite',
+    'revokeHouseholdInvite', 'joinHousehold', 'leaveHousehold',
+    'saveDish', 'deleteDish', 'seedDishes', 'savePlan', 'replaceDayMeals',
+    'clearWeek', 'replaceShopping', 'deleteShoppingItem', 'importAll', 'wipe',
+  ] as const
+  const mutable = adapter as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+  for (const name of WRITES) {
+    const original = mutable[name].bind(adapter)
+    mutable[name] = async (...args: unknown[]) => {
+      const result = await original(...args)
+      notifyChange()
+      return result
+    }
+  }
+
+  return adapter
 }
 
 function traducirAuthError(message: string): string {
