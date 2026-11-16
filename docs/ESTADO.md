@@ -25,12 +25,23 @@ links de invitación y la UI de Ajustes están en producción; la migración SQL
 Supabase y se verificó de punta a punta con dos cuentas temporales. Queda que lo pruebes con tu
 pareja en dos dispositivos.
 
+**Varias comidas por día: implementado en la rama `feature/multi-platos`.** Un día puede tener
+1..N comidas (cada una con su dificultad y su plato) y una sola nota; el default sigue siendo
+una comida por día, así que la vista no cambia hasta que se agrega otra. El boceto, la
+migración SQL, los adaptadores, la UI y los tests están listos y verificados localmente.
+**Falta aplicar `supabase/migration_comidas_por_dia.sql` en Supabase y desplegar**; el diseño
+y el plan de trabajo están en [`PROPUESTA-COMIDAS-POR-DIA.md`](PROPUESTA-COMIDAS-POR-DIA.md).
+
 ## Qué está hecho
 
 ### Semana (pantalla principal)
 
 - Navegación por semanas (lunes a domingo), con etiquetas “Esta semana / pasada / próxima”.
-- Dificultad por día: Del freezer, Muy fácil, Fácil, Media, Elaborada.
+- Dificultad **por comida**: Del freezer, Muy fácil, Fácil, Media, Elaborada.
+- **1..N comidas por día** (rama `feature/multi-platos`): botón “+ Agregar otra comida”,
+  ✕ para quitar una sección cuando hay 2 o más, y **una sola nota por día**. Sin nombres de
+  comidas: el recetario es el mismo para todas. Con 1 comida por día se conserva el wording
+  “N de 7 cenas”.
 - Sugerencias acordes a la dificultad, con opción de incluir platos más fáciles.
 - “Sorpréndeme” por día y “Sorpréndeme” para completar toda la semana sin repetir platos.
 - Cambiar dificultad conserva el plato si sigue siendo válido; si no, lo quita con aviso.
@@ -240,6 +251,9 @@ pareja en dos dispositivos.
   no toca el `.env.local` real.
 - **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
   queda en ~638 kB (aviso de tamaño, no bloqueante).
+- **Rama `feature/multi-platos` (16/11/2026):** `npm test` **67/67**, `npm run test:e2e`
+  **8/8** (los 6 anteriores sin cambios + 2 de N comidas), `tsc` limpio y build correcto.
+  Boceto visual revisado en los 3 temas. **Sin SQL aplicado ni deploy todavía.**
 - **Cuenta obligatoria (15/11/2026):** sin credenciales de Supabase la app muestra “Falta
   configurar Supabase” (no hay modo local para usuarios). `resolveAppMode` solo acepta
   `e2e-local` con `--mode e2e` **y** `VITE_E2E_LOCAL=1`; los tests cubren los tres casos.
@@ -616,3 +630,21 @@ pareja en dos dispositivos.
   (corrido 2 veces). Se ajustaron dos locadores del test de compras porque las `<option>` del
   selector también coincidían con `getByText(/^Verdulería$/)`.
 - **Verificación:** `npx tsc -b` limpio, `npm test` 44/44, `npm run build` correcto.
+
+### 2026-11-16 · Varias comidas por día (rama `feature/multi-platos`)
+
+- **Pedido:** que un día pueda tener más de una comida, y que la app sirva también a quienes
+  no cocinan solo de noche. Aclaraciones del usuario: **sin nombres de comidas, sin catálogo
+  nuevo**, cada día tiene las comidas que se le agreguen, un plato por comida, dificultad por
+  comida y **una sola nota por día**.
+- **Proceso:** boceto visual estático (`docs/mockup-comidas.html`, 3 temas, interactivo) →
+  tipos y lógica pura → migración SQL + adaptadores → UI. Diseño y decisiones en
+  [`PROPUESTA-COMIDAS-POR-DIA.md`](PROPUESTA-COMIDAS-POR-DIA.md).
+- **Modelo:** `plans.slot smallint default 0`, unique `(household_id, week_start, day, slot)`,
+  `MealEntry` / `DayMeals` / `MealPlanRow`, `src/lib/meals.ts`, `listMealPlans()` y
+  `replaceDayMeals()`. El default de 1 comida por día mantiene textos y tests anteriores.
+- **Shim de despliegue:** el cliente omite `slot` mientras todas las comidas sean la primera,
+  así que se puede desplegar antes de aplicar la migración sin ventana de caída.
+- **Verificación:** `tsc` limpio, `npm test` 67/67, `npm run build` correcto,
+  `npm run test:e2e` 8/8. **Pendiente:** aplicar `migration_comidas_por_dia.sql` en Supabase
+  y verificar con dos cuentas temporales.

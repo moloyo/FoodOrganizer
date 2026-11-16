@@ -17,7 +17,7 @@ Pensada mobile-first, en español, para cocina vegetariana.
 
 ## Qué hace
 
-- **Semana**: para cada día elegís una dificultad (Del freezer, Muy fácil, Fácil, Media, Elaborada) y la app sugiere platos que encajan. Podés dejar una nota por día ("sobró arroz, usarlo el jueves").
+- **Semana**: para cada día elegís una dificultad (Del freezer, Muy fácil, Fácil, Media, Elaborada) y la app sugiere platos que encajan. Podés **agregar más de una comida por día** (cada una con su dificultad y su plato) y dejar **una sola nota** por día.
 - **Recetario**: platos con dificultad, tiempo, etiquetas, ingredientes, pasos, link y si son aptos para freezer. El nombre del ingrediente se autocompleta para evitar duplicados.
 - **Sugerencias**: "Sorpréndeme" completa los días vacíos sin repetir platos y priorizando favoritos.
 - **Compras**: arma la lista de la semana agrupada en Verdulería, Supermercado, Dietética y Otros, suma cantidades compatibles (500 g + 1 kg → 1.5 kg), conserva lo tildado y deja agregar, editar o borrar ítems manuales eligiendo el rubro y con autocompletado del ingrediente.
@@ -44,9 +44,10 @@ pantalla de “Falta configurar Supabase” en lugar de abrir un modo local.
 ### Configurar Supabase
 
 1. Creá un proyecto gratis en [supabase.com](https://supabase.com).
-2. Abrí **SQL Editor** y ejecutá completo [`supabase/schema.sql`](supabase/schema.sql) y
-   después [`supabase/migration_hogares.sql`](supabase/migration_hogares.sql) (en ese orden).
-   La migración crea las tablas de hogares, migra los datos existentes y cambia el RLS.
+2. Abrí **SQL Editor** y ejecutá en orden [`supabase/schema.sql`](supabase/schema.sql),
+   [`supabase/migration_hogares.sql`](supabase/migration_hogares.sql) y
+   [`supabase/migration_comidas_por_dia.sql`](supabase/migration_comidas_por_dia.sql).
+   La última agrega la columna `slot` para varias comidas por día.
 3. En **Project Settings → API**, copiá `Project URL` y `anon public key`.
 4. Creá `.env.local` a partir de `.env.example`:
 
@@ -96,7 +97,7 @@ configuradas; si cambiás de dominio, actualizalas en Authentication → URL Con
 | `household_members` | Relación usuario ↔ hogar (`owner` / `member`). |
 | `household_invites` | Links de invitación con vencimiento, revocación y contador de usos. |
 | `dishes` | Recetario del hogar: dificultad, minutos, tags, ingredientes (`jsonb`), pasos, freezer. |
-| `plans` | Una fila por día y semana: `week_start` (lunes), `day` 0–6, `mode`, `dish_id` y `note`. |
+| `plans` | Una fila por comida, día y semana: `week_start` (lunes), `day` 0–6, `slot` (posición de la comida en el día), `mode`, `dish_id` y `note`. La nota solo se guarda en `slot = 0`. |
 | `shopping_items` | Lista de compras por semana, con tildado y rubro. |
 
 Las tres tablas de datos tienen `household_id` y RLS por membresía: solo se ven las filas del
@@ -114,6 +115,17 @@ mueven al hogar compartido y su hogar anterior vacío se elimina. “Salir del h
 hogar nuevo vacío **cuando queda otro miembro**; si sos el único, la opción directamente **no se
 muestra** (el hogar vacío se borraría con todos sus datos).
 Si el último miembro **borra su cuenta**, el hogar y sus datos sí se eliminan.
+
+## Varias comidas por día
+
+Cada día puede tener **1..N comidas**, todas iguales: dificultad, un plato y sus botones. El
+botón **"+" Agregar otra comida** suma una sección vacía y la ✕ la quita (solo cuando hay 2 o
+más). **La nota es una sola por día**, abajo de todas las secciones. No hay nombres de comidas:
+el recetario es el mismo para todas.
+
+El default es **una comida por día**, así que la app se ve igual que siempre hasta que agregás
+otra. "Sorpréndeme" llena todas las comidas vacías sin repetir platos en la semana, y la lista
+de compras suma los ingredientes de todas.
 
 ## Ideas para seguir
 

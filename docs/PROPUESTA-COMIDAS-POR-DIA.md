@@ -152,13 +152,12 @@ de planes), ni `households`.
    Ver §11. Los 6 tests E2E viejos siguen pasando **sin cambios**.
 5. [x] Verificación local: `npm test`, `npm run test:e2e`, `npm run build` (hechos; repetir
    antes del merge).
-6. [ ] **Ojo con el "preview con dos cuentas":** la migración cambia el `unique` de `plans`
-   en el mismo proyecto Supabase que usa producción. Aplicarla para un preview rompería al
-   cliente viejo que hoy está en `main`. Por eso la verificación con dos cuentas reales se
-   hace **después del merge**, sobre producción ya migrada (mismo playbook que hogares), o
-   bien contra un proyecto Supabase separado si se quiere aislar del todo.
-7. [ ] Merge a `main`, aplicar migración y desplegar juntos; verificar con dos cuentas
-   temporales y confirmar que los datos actuales siguen intactos.
+6. [x] **Sin preview aislado:** la migración cambia el `unique` de `plans` en el mismo
+   Supabase de producción, así que un preview con el schema nuevo rompería al cliente
+   viejo. Gracias al shim de §10 el orden seguro es: **merge → deploy (funciona con el
+   schema viejo) → aplicar la migración** ⇒ sin ventana de caída.
+7. [ ] Aplicar la migración y verificar con dos cuentas temporales; confirmar que los
+   datos actuales siguen intactos.
 
 ## 9. Etapa 2 implementada (solo lógica pura)
 
@@ -211,6 +210,14 @@ viejo, porque usa `select('*')`); `replaceDayMeals` hace delete + insert con `sl
 `slot > 0` ⇒ los backups v1 siguen importando en el schema viejo. **Los métodos legacy
 (`listPlans` / `savePlan`) no se tocaron**, así el dev server de la rama sigue funcionando
 contra el Supabase actual.
+
+**Shim de despliegue (añadido en la etapa 4):** `replaceDayMeals` **omite la columna
+`slot` cuando todas las comidas son la primera**, y `savePlan` legacy delega en
+`replaceDayMeals` (así las operaciones `savePlan` viejas de la cola offline siguen
+funcionando con el unique nuevo). Con eso el cliente nuevo funciona contra el schema
+viejo ⇒ se puede **desplegar primero y aplicar la migración después, sin ventana de
+caída**. La columna `slot` solo se envía cuando hay 2+ comidas, que es exactamente lo
+que la migración habilita.
 
 **`local.ts`**: `LocalDB.plans` pasa a `MealPlanRow[]`, normaliza `slot` al leer backups
 viejos y delega `savePlan` en `replaceDayMeals`. `listPlans` devuelve solo `slot = 0`.

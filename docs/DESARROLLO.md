@@ -10,8 +10,9 @@
 3. Iniciá el servidor: `npm run dev` → <http://localhost:5173>.
 4. Sin `.env.local` la app muestra **“Falta configurar Supabase”**: no hay modo local para
    usuarios reales (solo para los tests de Playwright).
-5. En el SQL Editor de Supabase corrieron `schema.sql` **y** `migration_hogares.sql` (en ese
-   orden); sin la migración la app no arranca.
+5. En el SQL Editor de Supabase corrieron `schema.sql`, `migration_hogares.sql` y
+   `migration_comidas_por_dia.sql` (en ese orden); sin la última el modelo de N comidas
+   por día no está disponible.
 6. Antes de cambiar código, confirmá que compila: `npm run build`.
 7. Leé [`ESTADO.md`](ESTADO.md) para saber qué está hecho y qué sigue.
 
@@ -182,6 +183,27 @@ sincronizar, esos cambios pendientes se pierden. Tampoco hay resolución de conf
   El borrado de **cuenta** sí elimina el hogar cuando era el último miembro (intencional y
   documentado).
 
+### Varias comidas por día
+
+- Un día tiene **1..N comidas** idénticas: `mode` (dificultad) + un `dishId`. **Sin nombres
+  de comidas y sin catálogo nuevo**: el recetario es el mismo para todas.
+- `src/lib/meals.ts` concentra la lógica pura: `DayMeals { day, meals, note }`,
+  `MealEntry { slot, mode, dishId }`, `addMeal`, `removeMeal`, `compactMeals`,
+  `groupMealRows` y `flattenDay`. La **nota es una sola por día** y se guarda en la fila
+  `slot = 0`.
+- **Default = 1 comida por día**: el contador y el subtítulo se mantienen literalmente
+  ("N de 7 cenas", "Solo cenas"). Si algún día tiene más de una, pasan a "N de M comidas".
+- `DayCard` muestra las secciones apiladas, la ✕ de sección solo con 2+ comidas, la nota
+  una sola vez abajo y el botón "+ Agregar otra comida".
+- `buildShoppingItemsForDays` recorre día → comida → plato; `suggestMeals` llena todas las
+  comidas vacías sin repetir platos. Las versiones de 1 comida por día delegan en ellas.
+- **`DataAdapter`**: `listMealPlans()` y `replaceDayMeals(week, day, rows)`. El offline
+  usa la clave de caché `mealPlans` y la operación de cola `replaceDayMeals`.
+- **Migración:** `supabase/migration_comidas_por_dia.sql` agrega `slot smallint not null
+  default 0` y cambia el unique a `(household_id, week_start, day, slot)`. Sin backfill.
+  El cliente omite `slot` mientras todas las comidas sean la primera, así que se puede
+  desplegar antes de aplicar la migración, sin ventana de caída.
+
 ## Sistema de temas
 
 La app tiene tres temas: **clásico** (por defecto, cálido), **cool** (azul) y **oscuro**.
@@ -262,6 +284,7 @@ Comidas/
 │  │  ├─ uuid.ts               # isUuid / newUuid compartidos
 │  │  ├─ invite.ts             # Captura y armado de links de invitación
 │  │  ├─ household.ts          # Regla para bloquear la salida de un hogar de un solo miembro
+│  │  ├─ meals.ts              # Lógica pura de N comidas por día (slots y nota única)
 │  │  ├─ suggest.ts            # Sugerencias y armado de lista de compras
 │  │  ├─ ingredients.ts        # Catálogo, normalización y búsqueda de ingredientes
 │  │  ├─ constants.ts          # Modos, colores, categorías, categorización
@@ -291,7 +314,8 @@ Comidas/
 ├─ index.html                  # Script que aplica el tema antes del primer render
 ├─ supabase/schema.sql         # Tablas base + RLS + delete_my_account()
 ├─ supabase/migration_hogares.sql # Hogares, membresías, invitaciones y RLS por hogar
-├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite, household)
+├─ supabase/migration_comidas_por_dia.sql # Columna `slot` y unique por (día, slot)
+├─ tests/                      # Vitest (date, constants, suggest, ingredients, appMode, offline, invite, household, meals)
 ├─ tests/e2e/                  # Tests de Playwright (semana, plato, compras, temas)
 ├─ tests/e2e/env/.env          # Entorno de test (VITE_E2E_LOCAL=1) para forzar el modo local
 ├─ vitest.config.ts            # Configuración de Vitest
@@ -345,7 +369,7 @@ Comidas/
 | `household_members` | Una por usuario/hogar | PK `(household_id, user_id)` + índice único por `user_id`; `role` `owner`/`member`. Sin policies de escritura. |
 | `household_invites` | Una por link | `token uuid` PK, `expires_at` (7 días), `revoked_at`, `used_count`. |
 | `dishes` | Una por plato | `ingredients` es `jsonb`, `tags` es `text[]`, `household_id not null`. |
-| `plans` | Una por día/semana | `unique(household_id, week_start, day)`; upsert con ese conflicto. |
+| `plans` | Una por **comida**, día y semana | `slot` (0..N-1) + `unique(household_id, week_start, day, slot)`; `note` solo en `slot = 0`. Se reescribe el día completo con `replaceDayMeals`. |
 | `shopping_items` | Una por ítem/semana | Se reemplaza la semana completa al guardar; `household_id not null`. |
 
 Las tres tablas de datos conservan `user_id` como metadata nullable y sin FK. El RLS usa
@@ -562,6 +586,7 @@ Todo está en `src/lib/suggest.ts`. Si cambiás la ponderación o el filtro, rev
 | `tests/offline.test.ts` | Errores de red, caché de lectura, cola por hogar (aislamiento y compartida), compactación, `rescope`, errores de RLS y ejemplos offline. |
 | `tests/invite.test.ts` | Parseo del token en el hash y armado del link de invitación. |
 | `tests/household.test.ts` | Bloqueo de “Salir del hogar” cuando hay un solo miembro. |
+| `tests/meals.test.ts` | N comidas por día: alta/baja, slots, nota única, compras y sugerencias. |
 
 Para agregar un test, creá `tests/<tema>.test.ts` e importá desde `../src/...`. Si una función
 necesita `window`/`localStorage`, o se prueba con Playwright o se extrae la lógica pura a
@@ -580,6 +605,7 @@ test con los 20 platos de ejemplo. En una build de producción esa variable se i
 | `tests/e2e/week.spec.ts` | “Sorpréndeme” completa la semana, persiste al recargar y se elige un plato según la dificultad. |
 | `tests/e2e/dishes.spec.ts` | Alta de plato con autocompletado “eso” → “Queso”, guardado y persistencia. |
 | `tests/e2e/shopping.spec.ts` | Lista agrupada por rubros, tildado e ítem manual (alta y borrado); autocompletado del nombre y elección de rubro en el ítem manual. |
+| `tests/e2e/meals.spec.ts` | Agregar/quitar comidas, nota única persistente y “Sorpréndeme” llenando todas las comidas vacías. |
 | `tests/e2e/themes.spec.ts` | Tema oscuro aplicado, color de barra y persistencia tras recargar; vuelta a clásico. |
 
 Cada test usa un contexto nuevo, así que el `localStorage` arranca limpio. Si Playwright falla,

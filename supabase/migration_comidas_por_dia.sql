@@ -6,11 +6,15 @@
 --
 --  Es idempotente: se puede correr dos veces sin romper nada.
 --
---  IMPORTANTE: esta migración cambia el UNIQUE de plans. El cliente
---  viejo hace upsert con onConflict 'household_id,week_start,day',
---  que deja de existir. Por eso MIGRACIÓN Y DEPLOY VAN JUNTOS
---  (mismo playbook que hogares): hay una ventana breve. Mientras la
---  rama feature/multi-platos no se mergee, main no se toca.
+--  SEGURIDAD DE DESPLIEGUE: el cliente nuevo omite la columna `slot`
+--  mientras todas las comidas de un día sean la primera, así que funciona
+--  también contra este schema viejo. Por eso se puede DESPLEGAR PRIMERO y
+--  aplicar esta migración DESPUÉS, sin ventana de caída. Solo cuando alguien
+--  agrega una 2da comida se necesita la columna nueva.
+--
+--  Importante: el cliente VIEJO hace upsert con
+--  onConflict 'household_id,week_start,day', que esta migración elimina.
+--  No lo apliques si todavía hay clientes viejos activos.
 -- ============================================================
 
 -- 1. Cada comida del día ocupa una fila, diferenciada por `slot`.

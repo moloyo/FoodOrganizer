@@ -300,6 +300,43 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     }
   }
 
+  /**
+   * Reemplaza todas las comidas de un día.
+   *
+   * Mientras todas las comidas sean la primera (`slot === 0`) **no enviamos la
+   * columna `slot`**: así el cliente nuevo funciona también contra el schema
+   * viejo y se puede desplegar antes de aplicar la migración, sin ventana de
+   * caída. Recién cuando hay 2+ comidas se incluye `slot` (schema nuevo).
+   */
+  async function replaceDayMealsImpl(
+    weekStart: string,
+    day: number,
+    rows: MealPlanRow[],
+  ): Promise<void> {
+    const householdId = await requireHouseholdId()
+    const removal = await client
+      .from('plans')
+      .delete()
+      .eq('household_id', householdId)
+      .eq('week_start', weekStart)
+      .eq('day', day)
+    if (removal.error) throw new Error(removal.error.message)
+    if (rows.length === 0) return
+
+    const needsSlot = rows.some((row) => row.slot > 0)
+    const payload = rows.map((row) => ({
+      household_id: householdId,
+      week_start: weekStart,
+      day,
+      ...(needsSlot ? { slot: row.slot } : {}),
+      mode: row.mode,
+      dish_id: row.dishId,
+      note: row.note ?? '',
+    }))
+    const { error } = await client.from('plans').insert(payload)
+    if (error) throw new Error(error.message)
+  }
+
   return {
     kind: 'cloud',
 
@@ -488,19 +525,19 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async savePlan(row) {
-      const householdId = await requireHouseholdId()
-      const payload: PlanDbRow = {
-        household_id: householdId,
-        week_start: row.weekStart,
-        day: row.day,
-        mode: row.mode,
-        dish_id: row.dishId,
-        note: row.note ?? '',
-      }
-      const { error } = await client
-        .from('plans')
-        .upsert(payload, { onConflict: 'household_id,week_start,day' })
-      if (error) throw new Error(error.message)
+      // Compatibilidad: las operaciones `savePlan` que quedaron en la cola
+      // offline de una sesión vieja deben seguir funcionando con el schema
+      // nuevo (donde ya no existe el ON CONFLICT por día).
+      await replaceDayMealsImpl(row.weekStart, row.day, [
+        {
+          weekStart: row.weekStart,
+          day: row.day,
+          slot: 0,
+          mode: row.mode,
+          dishId: row.dishId,
+          note: row.note ?? '',
+        },
+      ])
     },
 
     /* --------------------- N comidas por día (schema nuevo) --------------------- */
@@ -513,26 +550,7 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
     },
 
     async replaceDayMeals(weekStart, day, rows) {
-      const householdId = await requireHouseholdId()
-      const removal = await client
-        .from('plans')
-        .delete()
-        .eq('household_id', householdId)
-        .eq('week_start', weekStart)
-        .eq('day', day)
-      if (removal.error) throw new Error(removal.error.message)
-      if (rows.length === 0) return
-      const payload = rows.map((row) => ({
-        household_id: householdId,
-        week_start: weekStart,
-        day,
-        slot: row.slot,
-        mode: row.mode,
-        dish_id: row.dishId,
-        note: row.note ?? '',
-      }))
-      const { error } = await client.from('plans').insert(payload)
-      if (error) throw new Error(error.message)
+      await replaceDayMealsImpl(weekStart, day, rows)
     },
 
     async clearWeek(weekStart) {
