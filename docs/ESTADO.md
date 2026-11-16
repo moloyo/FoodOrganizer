@@ -1,13 +1,14 @@
 # Estado del proyecto · Comidas
 
-> Última actualización: **15 de noviembre de 2026**.
+> Última actualización: **16 de noviembre de 2026**.
 > Guía técnica y de convenciones: [`DESARROLLO.md`](DESARROLLO.md).
 
 ## Resumen
 
 La app está **funcional y probada de punta a punta** contra un proyecto real de Supabase.
-Permite planificar las cenas de la semana según la dificultad del día, elegir platos del
-recetario, generar la lista de compras, consultar el historial y funcionar como PWA instalable.
+Permite planificar las comidas de la semana según la dificultad de cada una (varias por día),
+elegir platos del recetario, generar la lista de compras, consultar el historial y funcionar
+como PWA instalable.
 
 **Todos los usuarios necesitan una cuenta**: la app pide login siempre y los datos se
 sincronizan en la nube. Sin credenciales de Supabase muestra una pantalla de configuración; el
@@ -38,7 +39,7 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
 
 - Navegación por semanas (lunes a domingo), con etiquetas “Esta semana / pasada / próxima”.
 - Dificultad **por comida**: Del freezer, Muy fácil, Fácil, Media, Elaborada.
-- **1..N comidas por día** (rama `feature/multi-platos`): botón “+ Agregar otra comida”,
+- **1..N comidas por día**: botón “+ Agregar otra comida”,
   ✕ para quitar una sección cuando hay 2 o más, y **una sola nota por día**. Sin nombres de
   comidas: el recetario es el mismo para todas. Con 1 comida por día se conserva el wording
   “N de 7 cenas”.
@@ -89,8 +90,9 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
 - Cuenta y sesión (ingresar, crear cuenta, salir). **La cuenta es obligatoria** para usar la app.
 - **Recuperación de contraseña:** “¿Olvidaste tu contraseña?” manda un link por email y abre una
   pantalla para elegir la nueva. También “Volver al ingreso” para descartar el cambio.
-- **Eliminar la cuenta** (con doble confirmación): borra la cuenta de Supabase y,
-  por las claves foráneas en cascada, todos sus platos, planes y compras.
+- **Eliminar la cuenta** (con doble confirmación): borra la cuenta de Supabase. Si el hogar
+  tiene otros miembros, los datos compartidos sobreviven; si era el último, el hogar y sus datos
+  se eliminan.
 - Instalar PWA (con instructivo para iOS).
 - Exportar/importar backup JSON.
 - Cargar los 20 platos de ejemplo.
@@ -135,9 +137,10 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   `delete_my_account()` adaptado). El cliente resuelve el hogar con `my_household()` y guarda un
   fallback en `comidas:household:v1:<userId>` para arrancar offline.
 - PWA con manifest, íconos, service worker y precache.
-- **Tests con Vitest** para fechas, rubros, sugerencias, unidades de compras e ingredientes,
-  más el modo de la app, el adaptador offline (ahora por hogar) y los links de invitación.
-- **Tests de interfaz con Playwright** (6 flujos críticos).
+- **Tests con Vitest** (67 tests en 9 archivos): fechas, rubros, sugerencias, unidades de
+  compras e ingredientes, más el modo de la app, el adaptador offline (por hogar), los links
+  de invitación, la regla de salida del hogar y la lógica de N comidas por día.
+- **Tests de interfaz con Playwright** (8 flujos críticos).
 - Repositorio git inicializado con historial (`main`).
 - README en español con setup y deploy.
 - Responsive mobile-first; sin desbordes horizontales a 390 px.
@@ -213,12 +216,13 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   nuevo correspondiente; en el editor de platos también se normalizan al abrir y al guardar.
   Sin errores de consola.
 - Sin errores de página/consola en las pruebas realizadas.
-- **Tests automatizados (15/11/2026):** `npm test` corre **44 tests en 8 archivos**:
-  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline`, `invite` y `household`.
-  Cubren conversión de unidades, unificación de nombres, preservación de tildados/manuales,
-  búsqueda tolerante a errores de tipeo, cuenta obligatoria/modo de test, caché de lectura, cola
-  de escrituras por hogar (aislamiento, cola compartida y `rescope`), compactación, descarte de
-  errores que no son de red, parseo/armado de links de invitación y la regla de salida del hogar.
+- **Tests automatizados (16/11/2026):** `npm test` corre **67 tests en 9 archivos**:
+  `date`, `constants`, `suggest`, `ingredients`, `appMode`, `offline`, `invite`, `household`
+  y `meals`. Cubren conversión de unidades, unificación de nombres, preservación de
+  tildados/manuales, búsqueda tolerante a errores de tipeo, cuenta obligatoria/modo de test,
+  caché de lectura, cola de escrituras por hogar (aislamiento, cola compartida y `rescope`),
+  compactación, descarte de errores que no son de red, parseo/armado de links de invitación,
+  la regla de salida del hogar y N comidas por día (slots, nota única, compras y sugerencias).
 - **Git (15/11/2026):** repositorio inicializado, `.gitignore` revisado y primer commit
   `c4ed472` con los 50 archivos de la primera versión. El remoto
   `git@github.com:moloyo/FoodOrganizer.git` estaba vacío; el 15/11 se publicó `main`.
@@ -244,11 +248,11 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
 - **Carga inicial (15/11/2026):** se corrigió un destello del estado “Tu recetario está vacío”
   mientras llegaban los datos de la nube: ahora se muestra el splash hasta que termina la
   primera carga.
-- **Tests de interfaz (15/11/2026):** `npm run test:e2e` corre **6 tests** de Playwright en Chrome
-  sobre un Vite en modo local (puerto 5175): “Sorpréndeme” y persistencia, elección de plato por
-  dificultad, alta de plato con “eso” → “Queso”, compras con tildado e ítem manual, **rubro y
-  autocompletado del ítem manual**, y temas. El modo `e2e` usa `tests/e2e/env` como `envDir` y
-  no toca el `.env.local` real.
+- **Tests de interfaz (16/11/2026):** `npm run test:e2e` corre **8 tests** de Playwright en
+  Chrome sobre un Vite en modo local (puerto 5175): “Sorpréndeme” y persistencia, elección de
+  plato por dificultad, alta de plato con “eso” → “Queso”, compras con tildado e ítem manual,
+  **rubro y autocompletado del ítem manual**, temas, y **agregar/quitar comidas + nota única**.
+  El modo `e2e` usa `tests/e2e/env` como `envDir` y no toca el `.env.local` real.
 - **Type-check + build (15/11/2026):** `npm run build` compila sin errores; el bundle principal
   queda en ~638 kB (aviso de tamaño, no bloqueante).
 - **Verificación real (16/11/2026, dos cuentas temporales):** se insertaron 2 comidas para el
@@ -277,7 +281,7 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   `anon` siguió viendo `[]`. Al borrar la cuenta A con `delete_my_account()` los datos
   compartidos sobrevivieron para B; al borrar B el hogar vacío se limpió (204 en ambos casos).
   El bundle desplegado contiene las RPC nuevas y el login público no tiene errores de consola.
-- **Pendiente:** prueba con la pareja en dos dispositivos (la cuenta principal no se tocó).
+  La cuenta principal no se tocó.
 
 ## Limitaciones conocidas
 
@@ -304,10 +308,8 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   hay un plato planificado sin ítems; hay que regenerarla a mano.
 - **Cambiar un ítem generado desde una receta** obliga a editar el plato y regenerar; en la
   lista solo se editan/borran los ítems manuales.
-- **Falta cambio de email** desde la app (la recuperación de contraseña y el borrado de cuenta
-  ya están).
-- **El borrado de cuenta necesita la migración aplicada.** Si el proyecto no tiene la versión
-  nueva de `delete_my_account()`, la app muestra un aviso para ejecutar `migration_hogares.sql`.
+- **El borrado de cuenta necesita las migraciones aplicadas.** En un proyecto nuevo hay que
+  correr los tres SQL del setup; si falta `delete_my_account()` la app lo avisa.
 - **Importar en nube borra todo antes de insertar y no es transaccional.**
 - **La semana visible vuelve a la actual al recargar.** El plan y la lista se guardan, pero la
   navegación de semanas no se persiste.
@@ -320,72 +322,50 @@ cuentas temporales. El diseño y el plan de trabajo quedan en
   momento, pero la base conserva el valor anterior hasta editar el plato, regenerar la lista
   o usar “Normalizar ingredientes”.
 - **Recetas de ejemplo provisorias.** Sirven para probar, no son el recetario definitivo.
-- **Sin escalado por comensales ni fotos.**
 
-## Pendientes priorizados
+## Pendientes
 
-### P0 · Antes de usar la app en serio
+> Los **P0 y P1 originales quedaron completados**: git y remoto, Supabase de punta a punta,
+> deploy en Vercel + Redirect URLs, cuenta obligatoria, hogares compartidos, offline,
+> tests (Vitest + Playwright), compras con unidades/rubros/autocompletado, notas del día,
+> normalización de ingredientes y N comidas por día. El detalle está en "Verificado hasta
+> ahora" y en la bitácora. Lo de abajo es lo único que sigue abierto.
 
-1. **Git local listo.** Repositorio inicializado, `.gitignore` y primer commit `c4ed472`.
-   - [x] `git init` + commit inicial.
-   - [x] Publicar el historial en el remoto (`git@github.com:moloyo/FoodOrganizer.git`);
-     `main` quedó en `28e9505`.
-2. **Terminar de probar Supabase de punta a punta** con el proyecto real:
-   - [x] ejecutar `supabase/schema.sql`;
-   - [x] cargar las variables en `.env.local`;
-   - [x] registrar una cuenta y probar escrituras (crear plato, planificar, compras);
-   - [x] registrar una segunda cuenta y verificar que cada una ve solo sus datos (RLS);
-     - [x] lectura anónima vacía y rechazo de escritura con `user_id` ajeno;
-     - [x] dos sesiones reales simultáneas (cuenta temporal; `delete_my_account` respondió 204);
-   - [x] configurar el deploy en Vercel con las variables de Supabase;
-   - [x] configurar Site URL y Redirect URLs (`comidas-pi.vercel.app/**` y `localhost:5173/**`);
-   - [x] probar el login y la recuperación de contraseña desde la URL pública.
-   - [x] volver a ejecutar `supabase/schema.sql` para habilitar `delete_my_account()`.
-3. **Aplicar y probar hogares:**
-   - [x] ejecutar `supabase/migration_hogares.sql` en el SQL Editor;
-   - [x] confirmar que no quedaron filas sin `household_id` (aviso final del script);
-   - [x] desplegar el cliente nuevo (`git push`, Vercel auto-deploy);
-   - [x] verificar RLS con dos cuentas: cada una ve solo su hogar y un `insert` con
-     `household_id` ajeno es rechazado (`403`);
-   - [x] crear un link, unir a la segunda cuenta y comprobar que comparten tablero;
-   - [x] probar borrado de cuenta con el hogar compartido (los datos sobreviven al otro miembro);
-   - [ ] probar el flujo real con la pareja en dos dispositivos.
-4. **Reemplazar los platos de ejemplo por recetas reales** (o crear las propias y borrar los ejemplos).
+### A cargo del usuario (no requiere código)
 
-### P1 · Próximas mejoras
+- [ ] Probar el hogar compartido con tu pareja en dos dispositivos (link → registro → unión →
+      edición compartida). La verificación con dos cuentas temporales ya pasó por API.
+- [ ] Probar offline real en el celular con la PWA instalada y modo avión. El adaptador está
+      cubierto por tests, pero no se probó en dispositivo.
+- [ ] Reemplazar los 20 platos de ejemplo por recetas reales (o crear las propias y borrar los
+      ejemplos). Por decisión tuya, hoy se mantienen los ejemplos.
 
-5. **Tests:** [x] Vitest para `date.ts`, `constants.ts`, `suggest.ts` e `ingredients.ts`
-   (22 tests). [x] Vitest para el modo de la app, el adaptador offline y los links de
-   invitación y la regla de salida (22 tests más; **44 en total**). [x] Playwright para los flujos críticos (**6 tests**).
-6. **Compras:** [x] borrar y editar ítems manuales, [x] convertir unidades (g/kg, ml/l, cda/cdta,
-   unidades), [x] unificar nombres al generar la lista y [x] rubro + autocompletado al agregar
-   o editar ítems manuales.
-7. **Cuenta:** [x] recuperación de contraseña, [x] borrado de cuenta, [x] cuenta obligatoria y
-   [x] hogar compartido (migración aplicada y verificada).
-8. **Nota del día:** [x] UI para editar y guardar la nota.
-9. **Manejo offline en nube:** [x] caché de lectura por hogar, [x] cola de escrituras con
-   reintento automático/manual y [x] aviso de estado en la interfaz.
-10. **Normalizar ingredientes ya guardados:** [x] acción en Ajustes.
-11. **Unificar nombres de ingredientes al generar la lista:** [x] incluido en `buildShoppingItems`.
+### Por decidir
 
-### P2 · Ideas
+Dos ideas técnicas de la lista anterior, explicadas en criollo:
 
-12. Cantidad de comensales y escalado de ingredientes.
-13. Fotos de platos.
-14. “Ya lo cociné” para mejorar sugerencias con el historial.
-15. Recordatorio semanal para planificar.
-16. Sincronización en tiempo real entre miembros del hogar (Supabase Realtime).
-17. Migraciones SQL versionadas (hoy el schema y la migración se corren a mano).
-18. Atajos de PWA y tema automático según el sistema (`prefers-color-scheme`).
-19. Cambio de email desde la app.
-20. Marcar recetas que no se quieren volver a sugerir.
+- **Sincronización en tiempo real (Supabase Realtime).** Hoy, si el otro miembro del hogar
+  cambia un plato, vos lo ves **solo al recargar**. Realtime permite suscribirse a los cambios
+  de las tablas y reflejarlos en pantalla al instante, sin recargar. Costo: manejar
+  suscripciones, reconexiones y la convivencia con la cola offline; no aporta nada cuando no
+  hay red. Es una mejora de comodidad, no corrige un error.
+- **Migraciones SQL versionadas.** Hoy los tres archivos (`schema.sql`,
+  `migration_hogares.sql`, `migration_comidas_por_dia.sql`) se corren **a mano** en el SQL
+  Editor, en orden, y no queda registro de cuáles ya se aplicaron. Versionarlas significa
+  numerarlas y guardar en la base una tabla con las ya ejecutadas, para poder levantar el
+  proyecto en otra máquina o en un segundo entorno de una sola pasada y saber siempre en qué
+  versión está. Es mantenimiento interno: no se ve en la app.
+
+> El resto de las ideas de la lista anterior (fotos, cantidad de comensales, "ya lo cociné",
+> recordatorios, atajos de PWA, cambio de email, excluir recetas) se descartaron por decisión
+> del usuario.
 
 ## Cómo retomar
 
 1. Leer [`DESARROLLO.md`](DESARROLLO.md) (setup, arquitectura y convenciones).
 2. `npm install` si hace falta y `npm run dev`.
 3. Correr `npm test` para confirmar que la lógica sigue sana.
-4. Revisar los pendientes P0 de arriba.
+4. Revisar la sección "Pendientes" de arriba.
 5. Antes de cerrar una sesión de trabajo: `npm test`, `npm run build`, actualizar la bitácora
    y, si se agregó una decisión importante, sumarla a la tabla de decisiones.
 
