@@ -145,6 +145,10 @@
   .note { display:flex; align-items:flex-start; gap:6px; margin-top:6px; padding:4px 6px; border-radius:8px; font-size:11px; color:var(--muted); cursor:pointer; }
   .note.blank { font-style:italic; opacity:.65; }
   .note svg { width:12px; height:12px; margin-top:2px; }
+  /* La nota es una sola por día: va fuera de las secciones, separada */
+  .day-body > .note {
+    margin-top:10px; padding-top:9px; border-top:1px solid var(--line); border-radius:0;
+  }
 
   .add {
     width:100%; margin-top:8px; border:1px dashed var(--line-strong); border-radius:12px;
@@ -224,8 +228,8 @@
               <button class="icon-btn" aria-label="Sugerir otro"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg></button>
               <button class="icon-btn danger" aria-label="Quitar plato"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
             </div>
-            <div class="note"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Comprar pan antes de salir</span></div>
           </div>
+          <div class="note"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Comprar pan antes de salir</span></div>
           <button class="add" data-add><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Agregar otra comida</button>
         </div>
       </div>
@@ -257,7 +261,6 @@
               <button class="icon-btn" aria-label="Sugerir otro"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg></button>
               <button class="icon-btn danger" aria-label="Quitar plato"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
             </div>
-            <div class="note blank"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Agregar nota del día</span></div>
           </div>
 
           <div class="meal">
@@ -275,9 +278,9 @@
               <button class="pick"><svg viewBox="0 0 24 24"><path d="M4 13h16a8 8 0 0 1-16 0Z"/><path d="M8 9c0-1.5 1-2.5 1-3.5"/></svg> Elegir plato</button>
               <button class="dice" aria-label="Sorpréndeme"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg></button>
             </div>
-            <div class="note blank"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Agregar nota del día</span></div>
           </div>
 
+          <div class="note blank"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Agregar nota del día</span></div>
           <button class="add" data-add><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Agregar otra comida</button>
         </div>
       </div>
@@ -303,14 +306,14 @@
               <button class="pick"><svg viewBox="0 0 24 24"><path d="M4 13h16a8 8 0 0 1-16 0Z"/><path d="M8 9c0-1.5 1-2.5 1-3.5"/></svg> Elegir plato</button>
               <button class="dice" aria-label="Sorpréndeme"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg></button>
             </div>
-            <div class="note blank"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Agregar nota del día</span></div>
           </div>
+          <div class="note blank"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Agregar nota del día</span></div>
           <button class="add" data-add><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Agregar otra comida</button>
         </div>
       </div>
     </div>
 
-    <p class="legend">Cada día muestra solo las comidas que le agregaste. Sin nombres, sin catálogo nuevo: el recetario es el mismo para todas.</p>
+    <p class="legend">Cada día muestra solo las comidas que le agregaste. Una sola nota por día, abajo de todas las secciones. Sin nombres y sin catálogo nuevo: el recetario es el mismo para todas.</p>
   </div>
 
   <nav class="bottom-nav">
@@ -338,7 +341,6 @@
       <button class="pick"><svg viewBox="0 0 24 24"><path d="M4 13h16a8 8 0 0 1-16 0Z"/><path d="M8 9c0-1.5 1-2.5 1-3.5"/></svg> Elegir plato</button>
       <button class="dice" aria-label="Sorpréndeme"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg></button>
     </div>
-    <div class="note blank"><svg viewBox="0 0 24 24"><path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/></svg><span>Agregar nota del día</span></div>
   </div>
 </template>
 

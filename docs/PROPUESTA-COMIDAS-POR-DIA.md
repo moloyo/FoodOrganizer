@@ -12,8 +12,8 @@ Un día puede tener **más de una comida**, pero:
 - **No hay nombres de comidas** ("Almuerzo", "Cena", "Desayuno"). No se etiquetan.
 - **No hay catálogo de comidas ni configuración por hogar.** El único catálogo es el
   recetario (`dishes`), compartido por todos: los platos disponibles son siempre los mismos.
-- Cada comida es **la misma sección de hoy repetida**: dificultad (`ModeChips`), **un** plato,
-  y nota.
+- Cada comida es **la misma sección de hoy repetida**: dificultad (`ModeChips`) y **un** plato.
+  La **nota es una sola por día**, abajo de todas las secciones (no se repite).
 - Un botón **"+"** al pie del día agrega otra sección igual, vacía. Cada sección se puede
   quitar.
 - **Cada día tiene la cantidad de secciones que el usuario quiera**: puede haber un martes con
@@ -29,7 +29,7 @@ mismos textos, mismos tests). Los usuarios actuales no ven ningún cambio hasta 
 | Alcance | N secciones por día, sin nombres ni catálogo nuevo. |
 | Platos por sección | **Uno**. "Agregar a mano" = agregar otra sección o cambiar el plato. |
 | Dificultad | **Por sección**: cada una tiene su propio modo y eso filtra sus sugerencias. |
-| Nota | **Por sección** (es parte de la sección que se repite). |
+| Nota | **Una por día**, abajo de todas las secciones (como hoy, no se repite). |
 | Sugerencias | "Sorpréndeme" elige 1 plato por sección; el resto se agrega a mano. |
 | Sorpréndeme de semana | Llena **todas las secciones vacías** de la semana, sin repetir platos. |
 | Vista | **Agrupar por día**: una `DayCard` con N secciones apiladas. |
@@ -52,7 +52,9 @@ alter table public.plans
 ```
 
 - **Sin backfill**: las 7 filas actuales quedan en `slot = 0` por el default.
-- `mode`, `dish_id` y `note` pasan a ser **de la sección**.
+- `mode` y `dish_id` pasan a ser **de la sección**. `note` sigue siendo **del día**: se guarda
+  en la fila `slot = 0` y las demás la llevan vacía. Al recompactar `slot` (quitar la primera
+  sección) hay que conservar la nota en la nueva fila `0`.
 - RLS (`is_household_member(household_id)`) e índices: **sin cambios**. No hay tablas nuevas.
 - Cola offline: `savePlan` sigue siendo un `upsert` por fila; `onConflict` pasa a
   `household_id,week_start,day,slot`. Agregar/quitar/reordenar secciones reescribe los `slot`
@@ -78,11 +80,11 @@ interface MealEntry {
   slot: number
   mode: DayMode | null
   dishId: string | null
-  note: string
 }
 interface DayMeals {
   day: number
   meals: MealEntry[]   // ordenadas por slot
+  note: string         // una sola, del día
 }
 ```
 
@@ -98,9 +100,9 @@ las agrupa por `(weekStart, day)` y ordena por `slot`.
 | `src/lib/adapters/cloud.ts` | Mapear `slot`, cambiar `onConflict`, enviar `slot` en inserts/upserts. |
 | `src/lib/adapters/local.ts` | Stub con `slot` para E2E. |
 | `src/lib/adapters/offline.ts` | Prefijo de caché `comidas:cache:v2` (cambia la forma de los planes). |
-| `src/state/AppContext.tsx` | `days`, `persistDay` → `persistMeal`, `addMeal`, `removeMeal`, `moveMeal`, `setMealMode/Dish/Note`, `shuffleMeal`, `fillEmptyMeals`, `plannedDishIds`, `shoppingOutdated`, `repeatWeek`, `clearWeek`. |
+| `src/state/AppContext.tsx` | `days`, `persistDay` → `persistMeal`, `addMeal`, `removeMeal`, `moveMeal`, `setMealMode/Dish`, `setDayNote` (día), `shuffleMeal`, `fillEmptyMeals`, `plannedDishIds`, `shoppingOutdated`, `repeatWeek`, `clearWeek`. |
 | `src/lib/suggest.ts` | `buildShoppingItems` recorre día → sección → plato; `suggestWeek` no repite platos entre todas las secciones. |
-| `src/components/DayCard.tsx` | Contenedor del día + N secciones (cada una con `ModeChips`, plato, nota, X) + botón "+". |
+| `src/components/DayCard.tsx` | Contenedor del día + N secciones (cada una con `ModeChips`, plato y ✕) + **una sola nota** abajo + botón "+". |
 | `src/screens/WeekScreen.tsx` | Contador y textos derivados de la cantidad real de secciones; `DishPickerSheet` recibe `(día, slot)`. |
 | `src/screens/HistoryScreen.tsx` | Detalle con varias secciones por día. |
 | `tests/` | Lógica pura (sugerencias sin repetir con N secciones, compras con 2 secciones, compactado de slots) + E2E de agregar/quitar sección. |
@@ -111,10 +113,12 @@ de planes), ni `households`.
 
 ## 6. Detalles que decido yo (no requieren respuesta)
 
-- "+" agrega una sección **vacía**: sin dificultad, sin plato, sin nota.
+- "+" agrega una sección **vacía**: sin dificultad y sin plato.
 - Cada sección tiene su **✕** para quitarse, **solo cuando el día tiene 2 o más secciones**.
   Con una sola sección esa ✕ no aparece: el día siempre existe y se conserva la ✕ de la fila
   del plato ("Quitar plato") tal como funciona hoy. Al quitar se recompactan los `slot`.
+- **La nota va una sola vez por día**, abajo de todas las secciones y separada por una línea,
+  igual que hoy pero fuera de las secciones. Se guarda en la fila `slot = 0`.
 - Reordenar con ↑/↓ se deja para una segunda iteración (el orden de creación alcanza).
 - **Contador y textos:** mientras todos los días tengan 1 sección se conserva literalmente
   **"N de 7 cenas"** y el subtítulo "Solo cenas" (así los 6 tests E2E siguen pasando sin
