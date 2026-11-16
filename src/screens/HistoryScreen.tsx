@@ -8,7 +8,7 @@ import { Button, EmptyState } from '../components/ui'
 import { ModeTag } from '../components/ModeChips'
 import { DAY_SHORT, formatWeekRange, isCurrentWeek, relativeWeekLabel } from '../lib/date'
 import { modeMeta } from '../lib/constants'
-import type { DayPlan } from '../types'
+import type { DayMeals } from '../types'
 
 export function HistoryScreen() {
   const { history, plansForWeek, weekStart, repeatWeek, goToWeek } = useApp()
@@ -59,7 +59,10 @@ export function HistoryScreen() {
         <div className="space-y-2.5">
           {history.map((week) => {
             const days = plansForWeek(week)
-            const dishes = days.filter((day) => day.dishId).length
+            const meals = days.flatMap((day) => day.meals)
+            const count = meals.filter((meal) => meal.dishId).length
+            const singlePerDay = days.every((day) => day.meals.length === 1)
+            const noun = singlePerDay ? 'cena' : 'comida'
             const expanded = openWeek === week
             const current = isCurrentWeek(week) || week === weekStart
             return (
@@ -74,11 +77,11 @@ export function HistoryScreen() {
                       {relativeWeekLabel(week)}
                     </p>
                     <p className="mt-0.5 text-[11.5px] text-muted">
-                      {formatWeekRange(week)} · {dishes} cena{dishes === 1 ? '' : 's'}
+                      {formatWeekRange(week)} · {count} {noun}{count === 1 ? '' : 's'}
                     </p>
                     <div className="mt-2 flex gap-1">
                       {days.map((day) => {
-                        const meta = modeMeta(day.mode)
+                        const meta = modeMeta(day.meals[0]?.mode ?? null)
                         return (
                           <span
                             key={day.day}
@@ -101,7 +104,7 @@ export function HistoryScreen() {
                   <div className="border-t border-line bg-cream/40 px-4 py-3">
                     <div className="divide-y divide-line/70">
                       {days.map((day) => (
-                        <HistoryDay key={day.day} day={day} />
+                        <HistoryDay key={day.day} day={day} noun={noun} />
                       ))}
                     </div>
 
@@ -139,22 +142,33 @@ export function HistoryScreen() {
   )
 }
 
-function HistoryDay({ day }: { day: DayPlan }) {
+function HistoryDay({ day, noun }: { day: DayMeals; noun: string }) {
   const { dishes } = useApp()
-  const dish = dishes.find((item) => item.id === day.dishId)
+  const planned = day.meals.filter((meal) => meal.dishId)
   return (
-    <div className="flex items-center gap-3 py-2">
-      <span className="w-8 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted">
+    <div className="flex items-start gap-3 py-2">
+      <span className="mt-1 w-8 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted">
         {DAY_SHORT[day.day]}
       </span>
       <div className="min-w-0 flex-1">
-        {dish ? (
-          <p className="truncate text-[13px] font-medium text-ink">{dish.name}</p>
+        {planned.length > 0 ? (
+          planned.map((meal) => {
+            const dish = dishes.find((item) => item.id === meal.dishId)
+            return (
+              <p key={meal.slot} className="truncate text-[13px] font-medium text-ink">
+                {dish?.name ?? 'Plato eliminado'}
+              </p>
+            )
+          })
         ) : (
-          <p className="text-[12px] text-muted">Sin cena</p>
+          <p className="text-[12px] text-muted">Sin {noun}</p>
         )}
       </div>
-      <ModeTag mode={day.mode} />
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        {day.meals.map((meal) => (
+          <ModeTag key={meal.slot} mode={meal.mode} />
+        ))}
+      </div>
     </div>
   )
 }

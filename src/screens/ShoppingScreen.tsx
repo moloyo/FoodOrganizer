@@ -77,7 +77,9 @@ export function ShoppingScreen() {
   const catalog = useMemo(() => buildIngredientCatalog(dishes), [dishes])
   const ordered = useMemo(() => sortShopping(shopping), [shopping])
   const checked = shopping.filter((item) => item.checked).length
-  const plannedDishes = days.filter((day) => day.dishId).length
+  const plannedDishes = days
+    .flatMap((day) => day.meals)
+    .filter((meal) => meal.dishId).length
 
   const groups = useMemo(() => {
     const map = new Map<string, typeof ordered>()

@@ -33,27 +33,36 @@ export function WeekScreen() {
     fillEmptyDays,
     clearWeek,
     loadExamples,
-    setDayDish,
+    setMealDish,
     busy,
   } = useApp()
 
   const [pickerDay, setPickerDay] = useState<number | null>(null)
+  const [pickerSlot, setPickerSlot] = useState(0)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingDish, setEditingDish] = useState<Dish | null>(null)
   const [viewingDish, setViewingDish] = useState<Dish | null>(null)
   const [pendingDay, setPendingDay] = useState<number | null>(null)
+  const [pendingSlot, setPendingSlot] = useState(0)
   const [filling, setFilling] = useState(false)
 
-  const planned = days.filter((day) => day.dishId).length
+  const meals = days.flatMap((day) => day.meals)
+  const planned = meals.filter((meal) => meal.dishId).length
+  /** Con 1 comida por día conservamos literalmente el wording y los tests de hoy. */
+  const singlePerDay = days.every((day) => day.meals.length === 1)
+  const total = singlePerDay ? 7 : meals.length
+  const noun = singlePerDay ? 'cena' : 'comida'
+  const counter = `${planned} de ${total} ${noun}${total === 1 ? '' : 's'}`
+  const missing = total - planned
   const todayWeek = isCurrentWeek(weekStart)
   const year = weekStart.slice(0, 4)
 
   const message =
     planned === 0
       ? 'Marcá la dificultad de cada día y te sugerimos qué cocinar.'
-      : planned === 7
+      : missing === 0
         ? 'Semana completa. ¡A cocinar!'
-        : `Te falta${7 - planned === 1 ? '' : 'n'} ${7 - planned} cena${7 - planned === 1 ? '' : 's'} por elegir.`
+        : `Te falta${missing === 1 ? '' : 'n'} ${missing} ${noun}${missing === 1 ? '' : 's'} por elegir.`
 
   async function handleFill() {
     setFilling(true)
@@ -64,8 +73,14 @@ export function WeekScreen() {
     }
   }
 
-  function openNewDish(day: number | null) {
+  function openPicker(day: number, slot: number) {
+    setPickerDay(day)
+    setPickerSlot(slot)
+  }
+
+  function openNewDish(day: number | null, slot = 0) {
     setPendingDay(day)
+    setPendingSlot(slot)
     setEditingDish(null)
     setEditorOpen(true)
   }
@@ -76,7 +91,11 @@ export function WeekScreen() {
         eyebrow="Menú semanal"
         title="La semana"
         action={<Logo />}
-        subtitle="Solo cenas. Elegí cuánta energía tenés cada día."
+        subtitle={
+          singlePerDay
+            ? 'Solo cenas. Elegí cuánta energía tenés cada día.'
+            : 'Las comidas de la semana, según tu energía.'
+        }
       />
 
       <div className="card flex items-stretch overflow-hidden">
@@ -117,7 +136,7 @@ export function WeekScreen() {
       <div className="card mt-3 overflow-hidden">
         <div className="flex items-center justify-between gap-2 p-4">
           <div className="min-w-0">
-            <p className="text-[13.5px] font-semibold text-ink">{planned} de 7 cenas</p>
+            <p className="text-[13.5px] font-semibold text-ink">{counter}</p>
             <p className="mt-0.5 text-[11.5px] leading-snug text-muted">{message}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -144,7 +163,7 @@ export function WeekScreen() {
         <div className="h-1.5 bg-cream">
           <div
             className="h-full rounded-r-full bg-brand transition-all duration-500"
-            style={{ width: `${(planned / 7) * 100}%` }}
+            style={{ width: `${(planned / total) * 100}%` }}
           />
         </div>
       </div>
@@ -172,14 +191,10 @@ export function WeekScreen() {
           <DayCard
             key={day.day}
             day={day}
+            dishes={dishes}
             date={dayDate(weekStart, day.day)}
-            dish={dishes.find((dish) => dish.id === day.dishId)}
-            onPick={() => setPickerDay(day.day)}
-            onView={() =>
-              setViewingDish(
-                dishes.find((dish) => dish.id === day.dishId) ?? null,
-              )
-            }
+            onPick={(slot) => openPicker(day.day, slot)}
+            onView={(dish) => setViewingDish(dish)}
           />
         ))}
       </div>
@@ -191,8 +206,9 @@ export function WeekScreen() {
 
       <DishPickerSheet
         dayIndex={pickerDay}
+        slot={pickerSlot}
         onClose={() => setPickerDay(null)}
-        onCreateDish={() => openNewDish(pickerDay)}
+        onCreateDish={() => openNewDish(pickerDay, pickerSlot)}
       />
 
       <DishDetail
@@ -211,7 +227,7 @@ export function WeekScreen() {
         dish={editingDish}
         onClose={() => setEditorOpen(false)}
         onSaved={(dish) => {
-          if (pendingDay !== null) void setDayDish(pendingDay, dish.id)
+          if (pendingDay !== null) void setMealDish(pendingDay, pendingSlot, dish.id)
           setPendingDay(null)
         }}
       />

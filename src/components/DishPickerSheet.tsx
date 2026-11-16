@@ -10,26 +10,33 @@ import { ModeTag } from './ModeChips'
 
 export function DishPickerSheet({
   dayIndex,
+  slot,
   onClose,
   onCreateDish,
 }: {
   dayIndex: number | null
+  slot: number
   onClose: () => void
   onCreateDish: () => void
 }) {
-  const { days, dishes, setDayDish } = useApp()
+  const { days, dishes, setMealDish } = useApp()
   const [search, setSearch] = useState('')
   const [includeEasier, setIncludeEasier] = useState(true)
   const [showAll, setShowAll] = useState(false)
 
   const plan = dayIndex === null ? null : days[dayIndex]
-  const mode = plan?.mode ?? null
+  const meal = plan?.meals.find((item) => item.slot === slot)
+  const mode = meal?.mode ?? null
   const meta = modeMeta(mode)
+  const hasMany = (plan?.meals.length ?? 1) > 1
+  const noun = hasMany ? 'Comida' : 'Cena'
 
   const usedBy = useMemo(() => {
     const map = new Map<string, number>()
     for (const day of days) {
-      if (day.dishId) map.set(day.dishId, day.day)
+      for (const item of day.meals) {
+        if (item.dishId) map.set(item.dishId, day.day)
+      }
     }
     return map
   }, [days])
@@ -57,13 +64,13 @@ export function DishPickerSheet({
 
   async function select(dish: Dish) {
     if (dayIndex === null) return
-    await setDayDish(dayIndex, dish.id)
+    await setMealDish(dayIndex, slot, dish.id)
     onClose()
   }
 
   async function clear() {
     if (dayIndex === null) return
-    await setDayDish(dayIndex, null)
+    await setMealDish(dayIndex, slot, null)
     onClose()
   }
 
@@ -77,7 +84,7 @@ export function DishPickerSheet({
       open={dayIndex !== null}
       onClose={onClose}
       wide
-      title={dayIndex === null ? 'Elegir cena' : `Cena del ${DAY_NAMES[dayIndex].toLowerCase()}`}
+      title={dayIndex === null ? `Elegir ${noun.toLowerCase()}` : `${noun} del ${DAY_NAMES[dayIndex].toLowerCase()}`}
       subtitle={
         meta
           ? `${meta.label} · ${meta.hint.toLowerCase()}`
@@ -89,7 +96,7 @@ export function DishPickerSheet({
             <Plus className="size-4" />
             Plato nuevo
           </Button>
-          {plan?.dishId && (
+          {meal?.dishId && (
             <Button variant="danger" onClick={clear}>
               <X className="size-4" />
               Quitar

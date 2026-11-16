@@ -9,15 +9,15 @@ import {
   type ReactNode,
 } from 'react'
 import type {
+  DayMeals,
   DayMode,
-  DayPlan,
   Dish,
   Household,
   HouseholdInvite,
   HouseholdMember,
   InviteInfo,
+  MealPlanRow,
   OfflineStatus,
-  PlanRow,
   SessionUser,
   ShoppingItem,
   Snapshot,
@@ -30,11 +30,20 @@ import {
   canonicalIngredientName,
 } from '../lib/ingredients'
 import {
-  buildShoppingItems,
+  addMeal as addMealToDay,
+  emptyDay as emptyMealDay,
+  flattenDay,
+  groupMealRows,
+  removeMeal as removeMealFromDay,
+  setDayNote as setDayNoteOnDay,
+  setMeal as setMealOnDay,
+} from '../lib/meals'
+import {
+  buildShoppingItemsForDays,
   matchesMode,
   mergeShopping,
   pickSuggestion,
-  suggestWeek,
+  suggestMeals,
 } from '../lib/suggest'
 import { SEED_DISHES } from '../data/seed'
 
@@ -70,21 +79,24 @@ interface AppContextValue {
   isCloud: boolean
   cloudConfigured: boolean
   weekStart: string
-  days: DayPlan[]
+  /** Un día con 1..N comidas y una sola nota. */
+  days: DayMeals[]
   dishes: Dish[]
   shopping: ShoppingItem[]
   shoppingOutdated: boolean
   history: string[]
-  plansForWeek: (week: string) => DayPlan[]
+  plansForWeek: (week: string) => DayMeals[]
   toasts: Toast[]
   toast: (message: string, tone?: ToastTone) => void
   dismissToast: (id: string) => void
   goToWeek: (weekStart: string) => void
   shiftWeek: (amount: number) => void
-  setDayMode: (day: number, mode: DayMode | null) => Promise<void>
-  setDayDish: (day: number, dishId: string | null) => Promise<void>
+  addMeal: (day: number) => Promise<void>
+  removeMeal: (day: number, slot: number) => Promise<void>
+  setMealMode: (day: number, slot: number, mode: DayMode | null) => Promise<void>
+  setMealDish: (day: number, slot: number, dishId: string | null) => Promise<void>
   setDayNote: (day: number, note: string) => Promise<void>
-  shuffleDay: (day: number) => Promise<void>
+  shuffleMeal: (day: number, slot: number) => Promise<void>
   fillEmptyDays: () => Promise<number>
   clearWeek: () => Promise<void>
   repeatWeek: (sourceWeekStart: string) => Promise<number>
@@ -111,10 +123,6 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null)
 
-function emptyDay(day: number): DayPlan {
-  return { day, mode: null, dishId: null, note: '' }
-}
-
 export function AppProvider({ children }: { children: ReactNode }) {
   const adapter = useMemo(() => getAdapter(), [])
   const [ready, setReady] = useState(false)
@@ -126,7 +134,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [householdInvites, setHouseholdInvites] = useState<HouseholdInvite[]>([])
   const [weekStart, setWeekStart] = useState(currentWeekStart)
   const [dishes, setDishes] = useState<Dish[]>([])
-  const [allPlans, setAllPlans] = useState<PlanRow[]>([])
+  const [allMealPlans, setAllMealPlans] = useState<MealPlanRow[]>([])
   const [shopping, setShopping] = useState<ShoppingItem[]>([])
   const [history, setHistory] = useState<string[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -215,11 +223,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reloadAll = useCallback(async () => {
     const [nextDishes, nextPlans] = await Promise.all([
       adapter.listDishes(),
-      adapter.listPlans(),
+      adapter.listMealPlans(),
     ])
     setDishes(nextDishes)
-    setAllPlans(nextPlans)
-    const weeks = [...new Set(nextPlans.filter((p) => p.mode || p.dishId).map((p) => p.weekStart))]
+    setAllMealPlans(nextPlans)
+    const weeks = [
+      ...new Set(
+        nextPlans
+          .filter((row) => row.mode || row.dishId)
+          .map((row) => row.weekStart),
+      ),
+    ]
     setHistory(weeks.sort((a, b) => b.localeCompare(a)))
   }, [adapter])
 
@@ -284,7 +298,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) {
       setDishes([])
-      setAllPlans([])
+      setAllMealPlans([])
       setHistory([])
       setShopping([])
       setLoaded(true)
@@ -364,16 +378,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /* ------------------------------- Derivados ------------------------------- */
 
-  const days = useMemo<DayPlan[]>(() => {
-    return Array.from({ length: 7 }, (_, day) => {
-      const row = allPlans.find((plan) => plan.weekStart === weekStart && plan.day === day)
-      if (!row) return emptyDay(day)
-      return { day: row.day, mode: row.mode, dishId: row.dishId, note: row.note }
-    })
-  }, [allPlans, weekStart])
+  const days = useMemo<DayMeals[]>(
+    () => groupMealRows(allMealPlans, weekStart),
+    [allMealPlans, weekStart],
+  )
 
   const plannedDishIds = useMemo(
-    () => days.map((day) => day.dishId).filter((id): id is string => Boolean(id)),
+    () =>
+      days
+        .flatMap((day) => day.meals)
+        .map((meal) => meal.dishId)
+        .filter((id): id is string => Boolean(id)),
     [days],
   )
 
@@ -386,73 +401,90 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /* ------------------------------- Acciones ------------------------------- */
 
-  const persistDay = useCallback(
-    async (day: number, patch: Partial<DayPlan>) => {
-      const existing = allPlans.find(
-        (plan) => plan.weekStart === weekStart && plan.day === day,
-      )
-      const next: PlanRow = {
-        weekStart,
-        day,
-        mode: patch.mode !== undefined ? patch.mode : (existing?.mode ?? null),
-        dishId: patch.dishId !== undefined ? patch.dishId : (existing?.dishId ?? null),
-        note: patch.note !== undefined ? patch.note : (existing?.note ?? ''),
-      }
-
-      setAllPlans((prev) => {
-        const rest = prev.filter(
-          (plan) => !(plan.weekStart === weekStart && plan.day === day),
-        )
-        return [...rest, next]
-      })
+  /** Persiste TODAS las comidas de un día (agregar/quitar/reordenar incluidos). */
+  const saveDay = useCallback(
+    async (dayIndex: number, next: DayMeals) => {
+      const rows = flattenDay(next, weekStart)
+      setAllMealPlans((prev) => [
+        ...prev.filter(
+          (row) => !(row.weekStart === weekStart && row.day === dayIndex),
+        ),
+        ...rows,
+      ])
       setHistory((prev) => {
-        if (!next.mode && !next.dishId) return prev
-        return prev.includes(weekStart) ? prev : [weekStart, ...prev].sort((a, b) => b.localeCompare(a))
+        if (!next.meals.some((meal) => meal.mode || meal.dishId)) return prev
+        return prev.includes(weekStart)
+          ? prev
+          : [weekStart, ...prev].sort((a, b) => b.localeCompare(a))
       })
 
       try {
-        await adapter.savePlan(next)
+        await adapter.replaceDayMeals(weekStart, dayIndex, rows)
       } catch (error) {
         toast(error instanceof Error ? error.message : 'No pudimos guardar el día.', 'error')
         await reloadAll()
       }
     },
-    [adapter, allPlans, reloadAll, toast, weekStart],
+    [adapter, reloadAll, toast, weekStart],
   )
 
-  const setDayMode = useCallback(
-    async (day: number, mode: DayMode | null) => {
-      const current = allPlans.find(
-        (plan) => plan.weekStart === weekStart && plan.day === day,
-      )
-      const dish = current?.dishId
-        ? dishes.find((item) => item.id === current.dishId)
+  const currentDay = useCallback(
+    (dayIndex: number): DayMeals =>
+      days.find((item) => item.day === dayIndex) ?? emptyMealDay(dayIndex),
+    [days],
+  )
+
+  const addMeal = useCallback(
+    async (dayIndex: number) => {
+      await saveDay(dayIndex, addMealToDay(currentDay(dayIndex)))
+    },
+    [currentDay, saveDay],
+  )
+
+  const removeMeal = useCallback(
+    async (dayIndex: number, slot: number) => {
+      await saveDay(dayIndex, removeMealFromDay(currentDay(dayIndex), slot))
+    },
+    [currentDay, saveDay],
+  )
+
+  const setMealMode = useCallback(
+    async (dayIndex: number, slot: number, mode: DayMode | null) => {
+      const current = currentDay(dayIndex)
+      const meal = current.meals.find((item) => item.slot === slot)
+      const dish = meal?.dishId
+        ? dishes.find((item) => item.id === meal.dishId)
         : undefined
-      // Si el plato elegido sigue entrando en la nueva dificultad, lo conservamos.
       const keepDish = Boolean(dish && matchesMode(dish, mode))
-      await persistDay(day, keepDish ? { mode } : { mode, dishId: null })
+      let next = setMealOnDay(current, slot, { mode })
+      if (dish && !keepDish) {
+        next = setMealOnDay(next, slot, { dishId: null })
+        toast('Cambiamos la dificultad y quitamos el plato.', 'info')
+      }
+      await saveDay(dayIndex, next)
     },
-    [allPlans, dishes, persistDay, weekStart],
+    [currentDay, dishes, saveDay, toast],
   )
 
-  const setDayDish = useCallback(
-    async (day: number, dishId: string | null) => {
-      await persistDay(day, { dishId })
+  const setMealDish = useCallback(
+    async (dayIndex: number, slot: number, dishId: string | null) => {
+      await saveDay(dayIndex, setMealOnDay(currentDay(dayIndex), slot, { dishId }))
     },
-    [persistDay],
+    [currentDay, saveDay],
   )
 
   const setDayNote = useCallback(
-    async (day: number, note: string) => {
-      await persistDay(day, { note })
+    async (dayIndex: number, note: string) => {
+      await saveDay(dayIndex, setDayNoteOnDay(currentDay(dayIndex), note))
     },
-    [persistDay],
+    [currentDay, saveDay],
   )
 
-  const shuffleDay = useCallback(
-    async (day: number) => {
-      const current = days.find((item) => item.day === day)
-      const mode = current?.mode ?? 'facil'
+  const shuffleMeal = useCallback(
+    async (dayIndex: number, slot: number) => {
+      const current = currentDay(dayIndex)
+      const meal = current.meals.find((item) => item.slot === slot)
+      const mode = meal?.mode ?? 'facil'
       const suggestion = pickSuggestion(dishes, mode, { excludeIds: plannedDishIds })
       if (!suggestion) {
         toast(
@@ -463,34 +495,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
         )
         return
       }
-      await persistDay(day, {
-        mode: current?.mode ?? mode,
-        dishId: suggestion.id,
-      })
+      await saveDay(
+        dayIndex,
+        setMealOnDay(current, slot, {
+          mode: meal?.mode ?? mode,
+          dishId: suggestion.id,
+        }),
+      )
     },
-    [days, dishes, persistDay, plannedDishIds, toast],
+    [currentDay, dishes, plannedDishIds, saveDay, toast],
   )
 
   const fillEmptyDays = useCallback(async () => {
-    const emptyDays = days.filter((day) => !day.dishId)
-    if (emptyDays.length === 0) {
+    const emptyCount = days
+      .flatMap((day) => day.meals)
+      .filter((meal) => !meal.dishId).length
+    if (emptyCount === 0) {
       toast('La semana ya está completa.', 'info')
       return 0
     }
-    const picks = suggestWeek(dishes, days)
+    const picks = suggestMeals(dishes, days)
     if (picks.length === 0) {
       toast('No encontramos platos para esas dificultades.', 'error')
       return 0
     }
+    const byDay = new Map<number, typeof picks>()
     for (const pick of picks) {
-      await persistDay(pick.day, { dishId: pick.dishId, mode: pick.mode })
+      const list = byDay.get(pick.day) ?? []
+      list.push(pick)
+      byDay.set(pick.day, list)
     }
-    toast(`${picks.length} cena${picks.length === 1 ? '' : 's'} asignada${picks.length === 1 ? '' : 's'}.`, 'success')
+    for (const [dayIndex, dayPicks] of byDay) {
+      let next = currentDay(dayIndex)
+      for (const pick of dayPicks) {
+        next = setMealOnDay(next, pick.slot, { dishId: pick.dishId, mode: pick.mode })
+      }
+      await saveDay(dayIndex, next)
+    }
+    const noun = days.some((day) => day.meals.length > 1) ? 'comida' : 'cena'
+    toast(
+      `${picks.length} ${noun}${picks.length === 1 ? '' : 's'} asignada${picks.length === 1 ? '' : 's'}.`,
+      'success',
+    )
     return picks.length
-  }, [days, dishes, persistDay, toast])
+  }, [currentDay, days, dishes, saveDay, toast])
 
   const clearWeek = useCallback(async () => {
-    setAllPlans((prev) => prev.filter((plan) => plan.weekStart !== weekStart))
+    setAllMealPlans((prev) => prev.filter((row) => row.weekStart !== weekStart))
     setShopping([])
     try {
       await adapter.clearWeek(weekStart)
@@ -505,29 +556,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const goToWeek = useCallback((next: string) => setWeekStart(next), [])
 
   const plansForWeek = useCallback(
-    (week: string): DayPlan[] =>
-      Array.from({ length: 7 }, (_, day) => {
-        const row = allPlans.find((plan) => plan.weekStart === week && plan.day === day)
-        if (!row) return emptyDay(day)
-        return { day: row.day, mode: row.mode, dishId: row.dishId, note: row.note }
-      }),
-    [allPlans],
+    (week: string): DayMeals[] => groupMealRows(allMealPlans, week),
+    [allMealPlans],
   )
 
   const repeatWeek = useCallback(
     async (source: string) => {
-      const sourcePlans = allPlans.filter((plan) => plan.weekStart === source)
-      if (sourcePlans.length === 0) return 0
+      const sourceDays = groupMealRows(allMealPlans, source)
       let copied = 0
-      for (const plan of sourcePlans) {
-        if (!plan.mode && !plan.dishId) continue
-        await persistDay(plan.day, { mode: plan.mode, dishId: plan.dishId, note: plan.note })
+      for (const day of sourceDays) {
+        if (!day.meals.some((meal) => meal.mode || meal.dishId)) continue
+        // saveDay usa `weekStart` (la semana visible) como destino.
+        await saveDay(day.day, day)
         copied += 1
       }
       if (copied > 0) toast('Menú copiado a esta semana.', 'success')
       return copied
     },
-    [allPlans, persistDay, toast],
+    [allMealPlans, saveDay, toast],
   )
 
   const shiftWeek = useCallback((amount: number) => {
@@ -563,8 +609,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteDish = useCallback(
     async (id: string) => {
       setDishes((prev) => prev.filter((item) => item.id !== id))
-      setAllPlans((prev) =>
-        prev.map((plan) => (plan.dishId === id ? { ...plan, dishId: null } : plan)),
+      setAllMealPlans((prev) =>
+        prev.map((row) => (row.dishId === id ? { ...row, dishId: null } : row)),
       )
       try {
         await adapter.deleteDish(id)
@@ -620,7 +666,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [adapter, dishes, reloadAll, toast])
 
   const regenerateShopping = useCallback(async () => {
-    const fresh = buildShoppingItems(days, dishes)
+    const fresh = buildShoppingItemsForDays(days, dishes)
     const merged = mergeShopping(shopping, fresh, makeId)
     setShopping(merged)
     try {
@@ -743,7 +789,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await adapter.deleteAccount()
     setUser(null)
     setDishes([])
-    setAllPlans([])
+    setAllMealPlans([])
     setShopping([])
     setHistory([])
   }, [adapter])
@@ -782,7 +828,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const wipeData = useCallback(async () => {
     await adapter.wipe()
     setDishes([])
-    setAllPlans([])
+    setAllMealPlans([])
     setShopping([])
     setHistory([])
     toast('Datos borrados.', 'success')
@@ -819,10 +865,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dismissToast,
     goToWeek,
     shiftWeek,
-    setDayMode,
-    setDayDish,
+    addMeal,
+    removeMeal,
+    setMealMode,
+    setMealDish,
     setDayNote,
-    shuffleDay,
+    shuffleMeal,
     fillEmptyDays,
     clearWeek,
     repeatWeek,

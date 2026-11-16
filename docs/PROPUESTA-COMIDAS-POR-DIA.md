@@ -148,11 +148,17 @@ de planes), ni `households`.
 2. [x] **Tipos + lógica pura + tests** (sin tocar Supabase ni la UI). Ver §9.
 3. [x] **Migración SQL + adaptador** (cloud / local / offline). Ver §10. **El SQL no se
    ejecutó** y no hubo deploy.
-4. [ ] UI: `DayCard`, `WeekScreen`, `HistoryScreen`.
-5. [ ] Verificación local: `npm test`, `npm run test:e2e` (**los 6 tests deben seguir pasando sin
-   cambios**), `npm run build`.
-6. [ ] Verificación real con dos cuentas temporales en un **deploy de preview**, sin tocar `main`.
-7. [ ] Recién ahí: merge a `main`, aplicar migración y desplegar juntos.
+4. [x] **UI**: `DayCard`, `WeekScreen`, `DishPickerSheet`, `HistoryScreen`, `ShoppingScreen`.
+   Ver §11. Los 6 tests E2E viejos siguen pasando **sin cambios**.
+5. [x] Verificación local: `npm test`, `npm run test:e2e`, `npm run build` (hechos; repetir
+   antes del merge).
+6. [ ] **Ojo con el "preview con dos cuentas":** la migración cambia el `unique` de `plans`
+   en el mismo proyecto Supabase que usa producción. Aplicarla para un preview rompería al
+   cliente viejo que hoy está en `main`. Por eso la verificación con dos cuentas reales se
+   hace **después del merge**, sobre producción ya migrada (mismo playbook que hogares), o
+   bien contra un proyecto Supabase separado si se quiere aislar del todo.
+7. [ ] Merge a `main`, aplicar migración y desplegar juntos; verificar con dos cuentas
+   temporales y confirmar que los datos actuales siguen intactos.
 
 ## 9. Etapa 2 implementada (solo lógica pura)
 
@@ -222,3 +228,40 @@ leer de caché sin red, `clearWeek` limpiando la caché nueva).
 **Pendiente para la etapa 4:** cambiar `AppContext`/UI a `listMealPlans` +
 `replaceDayMeals`. Hasta entonces los métodos nuevos no se usan y **la migración no debe
 aplicarse**: el cliente viejo rompería su `onConflict`. `main` sigue intacto.
+
+## 11. Etapa 4 implementada (UI)
+
+**`AppContext.tsx`** — cambia de `PlanRow[]` a `MealPlanRow[]`:
+
+- `reloadAll()` usa `listMealPlans()`; `days` se deriva con `groupMealRows`.
+- `saveDay(dayIndex, DayMeals)` reemplaza a `persistDay`: hace `flattenDay` → actualización
+  optimista de `allMealPlans` → `adapter.replaceDayMeals`.
+- Acciones nuevas: `addMeal`, `removeMeal`, `setMealMode`, `setMealDish`, `shuffleMeal`.
+  `setDayNote` sigue siendo **una por día**.
+- `fillEmptyDays` usa `suggestMeals` y aplica todos los picks de un día en una sola
+  `saveDay`; `repeatWeek` copia todas las comidas; `deleteDish` limpia todas las filas;
+  `regenerateShopping` usa `buildShoppingItemsForDays`.
+- `plansForWeek` devuelve `DayMeals[]`.
+
+**`DayCard.tsx`** — reescrito según el boceto aprobado: N secciones (cada una con
+`ModeChips` + plato + sus botones), **✕ de sección solo con 2+ comidas**, **una sola nota**
+abajo de todas y separada por una línea, y botón **"+ Agregar otra comida"**.
+Con 1 comida por día conserva `aria-label`, botones y textos actuales.
+
+**`WeekScreen.tsx`** — contador/textos derivados de la cantidad real de comidas:
+con 1 por día se mantiene literalmente **"N de 7 cenas"** y el subtítulo "Solo cenas";
+si algún día tiene más, pasa a **"N de M comidas"**. `DishPickerSheet` recibe `(día, slot)`
+y `DishEditor` asigna el plato nuevo a la comida correcta.
+
+**`DishPickerSheet.tsx` / `HistoryScreen.tsx` / `ShoppingScreen.tsx`** — adaptados a
+`DayMeals`: filtros por comida, detalle con varios platos y conteo de planeados.
+
+**Tests:** `tests/e2e/meals.spec.ts` (2 casos nuevos): agregar 2 comidas cambia el contador,
+la nota es única y persiste tras recargar, quitar vuelve a 1 comida; y "Sorpréndeme" llena
+las 8 comidas. **Los 6 tests E2E anteriores siguen pasando sin tocarlos.**
+
+**Verificación:** `npx tsc -b` limpio · `npm test` **67/67** · `npm run build` correcto ·
+`npm run test:e2e` **8/8**. Captura real a 390 px revisada (2 días con 2 comidas, una nota
+por día), sin errores de consola.
+
+**Todavía no se ejecutó la migración ni hubo deploy.** `main` sigue intacto.
