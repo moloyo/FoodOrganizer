@@ -5,6 +5,7 @@ import type {
   HouseholdInvite,
   HouseholdMember,
   InviteInfo,
+  MealPlanRow,
   PlanRow,
   SessionUser,
   ShoppingItem,
@@ -24,7 +25,7 @@ const LOCAL_USER: SessionUser = {
 
 interface LocalDB {
   dishes: Dish[]
-  plans: PlanRow[]
+  plans: MealPlanRow[]
   shopping: ShoppingRow[]
   seeded: boolean
 }
@@ -42,7 +43,11 @@ function read(): LocalDB {
       if (parsed && Array.isArray(parsed.dishes)) {
         return {
           dishes: parsed.dishes ?? [],
-          plans: parsed.plans ?? [],
+          // Los backups viejos no tienen `slot`: cada día era una sola comida.
+          plans: (parsed.plans ?? []).map((plan) => ({
+            ...plan,
+            slot: plan.slot ?? 0,
+          })),
           shopping: parsed.shopping ?? [],
           seeded: Boolean(parsed.seeded),
         }
@@ -175,7 +180,7 @@ export function createLocalAdapter(): DataAdapter {
       db.dishes = db.dishes.filter((dish) => dish.id !== id)
       db.plans = db.plans.map((plan) =>
         plan.dishId === id ? { ...plan, dishId: null } : plan,
-      ) as PlanRow[]
+      )
       write(db)
     },
 
@@ -189,16 +194,45 @@ export function createLocalAdapter(): DataAdapter {
     },
 
     async listPlans() {
-      return read().plans
+      // La UI actual solo conoce la primera comida del día.
+      return read().plans.filter((plan) => plan.slot === 0)
     },
 
     async savePlan(row) {
+      await this.replaceDayMeals(row.weekStart, row.day, [
+        {
+          weekStart: row.weekStart,
+          day: row.day,
+          slot: row.slot ?? 0,
+          mode: row.mode,
+          dishId: row.dishId,
+          note: row.note ?? '',
+        },
+      ])
+    },
+
+    /* --------------------- N comidas por día --------------------- */
+
+    async listMealPlans() {
+      return read().plans
+    },
+
+    async replaceDayMeals(weekStart, day, rows) {
       const db = read()
-      const index = db.plans.findIndex(
-        (plan) => plan.weekStart === row.weekStart && plan.day === row.day,
+      const rest = db.plans.filter(
+        (plan) => !(plan.weekStart === weekStart && plan.day === day),
       )
-      if (index >= 0) db.plans[index] = row
-      else db.plans.push(row)
+      db.plans = [
+        ...rest,
+        ...rows.map((row) => ({
+          weekStart,
+          day,
+          slot: row.slot,
+          mode: row.mode,
+          dishId: row.dishId,
+          note: row.note ?? '',
+        })),
+      ]
       write(db)
     },
 
@@ -245,7 +279,10 @@ export function createLocalAdapter(): DataAdapter {
     async importAll(snapshot) {
       const db: LocalDB = {
         dishes: snapshot.dishes ?? [],
-        plans: snapshot.plans ?? [],
+        plans: (snapshot.plans ?? []).map((plan) => ({
+          ...plan,
+          slot: plan.slot ?? 0,
+        })),
         shopping: snapshot.shopping ?? [],
         seeded: true,
       }

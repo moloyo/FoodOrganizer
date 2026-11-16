@@ -146,7 +146,8 @@ de planes), ni `households`.
 1. [x] Confirmar este diseño con el **boceto visual** `docs/mockup-comidas.html` (HTML
    estático, sin backend: tema clásico/cool/oscuro, "+", "✕" y chips interactivos).
 2. [x] **Tipos + lógica pura + tests** (sin tocar Supabase ni la UI). Ver §9.
-3. [ ] Migración SQL + adaptador (cloud / local / offline).
+3. [x] **Migración SQL + adaptador** (cloud / local / offline). Ver §10. **El SQL no se
+   ejecutó** y no hubo deploy.
 4. [ ] UI: `DayCard`, `WeekScreen`, `HistoryScreen`.
 5. [ ] Verificación local: `npm test`, `npm run test:e2e` (**los 6 tests deben seguir pasando sin
    cambios**), `npm run build`.
@@ -177,3 +178,47 @@ de planes), ni `households`.
 
 **No se tocó:** Supabase, migraciones, adaptadores, `AppContext`, componentes ni pantallas.
 `main` sigue intacto.
+
+## 10. Etapa 3 implementada (SQL + adaptadores, sin ejecutar nada)
+
+**`supabase/migration_comidas_por_dia.sql`** (nuevo, idempotente, **NO ejecutado**):
+
+```sql
+alter table public.plans add column if not exists slot smallint not null default 0;
+alter table public.plans drop constraint if exists plans_household_week_day_key;
+alter table public.plans add constraint plans_household_week_day_slot_key
+  unique (household_id, week_start, day, slot);
+```
+
+- Sin backfill (el default `0` cubre las 7 filas actuales), sin cambios de RLS.
+- Incluye índice por `(household_id, week_start, day, slot)` y bloque de verificación.
+
+**`DataAdapter`** suma dos métodos, sin quitar los viejos:
+
+- `listMealPlans(): Promise<MealPlanRow[]>`
+- `replaceDayMeals(weekStart, day, rows): Promise<void>` — borra todas las filas del día e
+  inserta las nuevas (una operación por día, como `replaceShopping`).
+
+**`cloud.ts`**: `listMealPlans` normaliza `slot ?? 0` (funciona también contra el schema
+viejo, porque usa `select('*')`); `replaceDayMeals` hace delete + insert con `slot`.
+`mapPlan` ahora exporta `slot`, y `importAll` solo envía la columna cuando el backup tiene
+`slot > 0` ⇒ los backups v1 siguen importando en el schema viejo. **Los métodos legacy
+(`listPlans` / `savePlan`) no se tocaron**, así el dev server de la rama sigue funcionando
+contra el Supabase actual.
+
+**`local.ts`**: `LocalDB.plans` pasa a `MealPlanRow[]`, normaliza `slot` al leer backups
+viejos y delega `savePlan` en `replaceDayMeals`. `listPlans` devuelve solo `slot = 0`.
+
+**`offline.ts`**: nueva clave de caché `mealPlans`, nueva operación de cola
+`replaceDayMeals` (con compactación por día y limpieza con `clearWeek`), lectura con fallback
+offline y actualización optimista de la caché. `cacheSnapshot` prefiere `mealPlans`.
+
+**Tests:** 4 casos nuevos en `tests/offline.test.ts` (encolar/sincronizar, compactar,
+leer de caché sin red, `clearWeek` limpiando la caché nueva).
+
+**Verificación:** `npx tsc -b` limpio · `npm test` **67/67** · `npm run build` correcto ·
+`npm run test:e2e` **6/6**.
+
+**Pendiente para la etapa 4:** cambiar `AppContext`/UI a `listMealPlans` +
+`replaceDayMeals`. Hasta entonces los métodos nuevos no se usan y **la migración no debe
+aplicarse**: el cliente viejo rompería su `onConflict`. `main` sigue intacto.

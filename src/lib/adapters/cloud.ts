@@ -8,6 +8,7 @@ import type {
   HouseholdMember,
   Ingredient,
   InviteInfo,
+  MealPlanRow,
   PlanRow,
   SessionUser,
   ShoppingItem,
@@ -36,6 +37,8 @@ interface PlanDbRow {
   household_id: string
   week_start: string
   day: number
+  /** Ausente en el schema viejo: se normaliza a 0. */
+  slot?: number | null
   mode: string | null
   dish_id: string | null
   note: string
@@ -185,7 +188,19 @@ function mapPlan(row: PlanDbRow): PlanRow {
   return {
     weekStart: row.week_start,
     day: row.day,
+    slot: row.slot ?? 0,
     mode: (row.mode as PlanRow['mode']) ?? null,
+    dishId: row.dish_id,
+    note: row.note ?? '',
+  }
+}
+
+function mapMealPlan(row: PlanDbRow): MealPlanRow {
+  return {
+    weekStart: row.week_start,
+    day: row.day,
+    slot: row.slot ?? 0,
+    mode: (row.mode as MealPlanRow['mode']) ?? null,
     dishId: row.dish_id,
     note: row.note ?? '',
   }
@@ -488,6 +503,38 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
       if (error) throw new Error(error.message)
     },
 
+    /* --------------------- N comidas por día (schema nuevo) --------------------- */
+
+    async listMealPlans() {
+      const { data, error } = await client.from('plans').select('*')
+      if (error) throw new Error(error.message)
+      // `slot` no existe en el schema viejo: se normaliza a 0.
+      return ((data ?? []) as PlanDbRow[]).map(mapMealPlan)
+    },
+
+    async replaceDayMeals(weekStart, day, rows) {
+      const householdId = await requireHouseholdId()
+      const removal = await client
+        .from('plans')
+        .delete()
+        .eq('household_id', householdId)
+        .eq('week_start', weekStart)
+        .eq('day', day)
+      if (removal.error) throw new Error(removal.error.message)
+      if (rows.length === 0) return
+      const payload = rows.map((row) => ({
+        household_id: householdId,
+        week_start: weekStart,
+        day,
+        slot: row.slot,
+        mode: row.mode,
+        dish_id: row.dishId,
+        note: row.note ?? '',
+      }))
+      const { error } = await client.from('plans').insert(payload)
+      if (error) throw new Error(error.message)
+    },
+
     async clearWeek(weekStart) {
       const householdId = await requireHouseholdId()
       const { error } = await client
@@ -588,10 +635,15 @@ export function createCloudAdapter(url: string, anonKey: string): DataAdapter {
         if (error) throw new Error(error.message)
       }
       if (snapshot.plans.length > 0) {
+        // Si el backup no tiene slots (v1), no enviamos la columna: así el
+        // import sigue funcionando contra el schema viejo. Un backup con
+        // varias comidas (slot > 0) sí la incluye.
+        const hasSlots = snapshot.plans.some((plan) => (plan.slot ?? 0) > 0)
         const rows: PlanDbRow[] = snapshot.plans.map((plan) => ({
           household_id: householdId,
           week_start: plan.weekStart,
           day: plan.day,
+          ...(hasSlots ? { slot: plan.slot ?? 0 } : {}),
           mode: plan.mode,
           dish_id: mapDishId(plan.dishId),
           note: plan.note ?? '',

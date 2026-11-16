@@ -1,6 +1,7 @@
 import type {
   DataAdapter,
   Dish,
+  MealPlanRow,
   OfflineStatus,
   PlanRow,
   SessionUser,
@@ -48,6 +49,12 @@ type QueueOp =
   | { type: 'saveDish'; dish: Dish }
   | { type: 'deleteDish'; id: string }
   | { type: 'savePlan'; row: PlanRow }
+  | {
+      type: 'replaceDayMeals'
+      weekStart: string
+      day: number
+      rows: MealPlanRow[]
+    }
   | { type: 'clearWeek'; weekStart: string }
   | { type: 'replaceShopping'; weekStart: string; items: ShoppingItem[] }
   | { type: 'deleteShoppingItem'; id: string }
@@ -112,7 +119,10 @@ function writeJson(storage: StorageLike | null, key: string, value: unknown): vo
   }
 }
 
-function cacheKey(userId: string, name: 'dishes' | 'plans' | 'shopping'): string {
+function cacheKey(
+  userId: string,
+  name: 'dishes' | 'plans' | 'mealPlans' | 'shopping',
+): string {
   return `${CACHE_PREFIX}:${userId}:${name}`
 }
 
@@ -153,6 +163,15 @@ function compactQueue(queue: QueueOp[], op: QueueOp): QueueOp[] {
         existing.row.weekStart === op.row.weekStart && existing.row.day === op.row.day
       )
     }
+    if (op.type === 'replaceDayMeals' && existing.type === 'replaceDayMeals') {
+      return !(existing.weekStart === op.weekStart && existing.day === op.day)
+    }
+    if (op.type === 'savePlan' && existing.type === 'replaceDayMeals') {
+      return !(existing.weekStart === op.row.weekStart && existing.day === op.row.day)
+    }
+    if (op.type === 'replaceDayMeals' && existing.type === 'savePlan') {
+      return !(existing.row.weekStart === op.weekStart && existing.row.day === op.day)
+    }
     if (op.type === 'replaceShopping' && existing.type === 'replaceShopping') {
       return existing.weekStart !== op.weekStart
     }
@@ -162,6 +181,7 @@ function compactQueue(queue: QueueOp[], op: QueueOp): QueueOp[] {
     if (op.type === 'clearWeek') {
       if (existing.type === 'clearWeek') return existing.weekStart !== op.weekStart
       if (existing.type === 'savePlan') return existing.row.weekStart !== op.weekStart
+      if (existing.type === 'replaceDayMeals') return existing.weekStart !== op.weekStart
       if (existing.type === 'replaceShopping') return existing.weekStart !== op.weekStart
     }
     return true
@@ -235,17 +255,24 @@ export function createOfflineAdapter(
 
   /* ------------------------------- Caché ------------------------------- */
 
-  function cacheGet<T>(uid: string, name: 'dishes' | 'plans' | 'shopping'): T | null {
+  function cacheGet<T>(
+    uid: string,
+    name: 'dishes' | 'plans' | 'mealPlans' | 'shopping',
+  ): T | null {
     return readJson<T>(storage, cacheKey(uid, name))
   }
 
-  function cacheSet(uid: string, name: 'dishes' | 'plans' | 'shopping', value: unknown): void {
+  function cacheSet(
+    uid: string,
+    name: 'dishes' | 'plans' | 'mealPlans' | 'shopping',
+    value: unknown,
+  ): void {
     writeJson(storage, cacheKey(uid, name), value)
   }
 
   function cacheClearUser(uid: string): void {
     if (!storage) return
-    for (const name of ['dishes', 'plans', 'shopping'] as const) {
+    for (const name of ['dishes', 'plans', 'mealPlans', 'shopping'] as const) {
       try {
         storage.removeItem(cacheKey(uid, name))
       } catch {
@@ -294,10 +321,39 @@ export function createOfflineAdapter(
     cacheSet(uid, 'plans', plans)
   }
 
+  /** Reemplaza en caché todas las comidas de un día (N comidas por día). */
+  function cacheReplaceDayMeals(
+    uid: string,
+    weekStart: string,
+    day: number,
+    rows: MealPlanRow[],
+  ): void {
+    const plans = cacheGet<MealPlanRow[]>(uid, 'mealPlans')
+    if (!plans) return
+    const rest = plans.filter(
+      (plan) => !(plan.weekStart === weekStart && plan.day === day),
+    )
+    cacheSet(uid, 'mealPlans', [
+      ...rest,
+      ...rows.map((row) => ({
+        weekStart,
+        day,
+        slot: row.slot,
+        mode: row.mode,
+        dishId: row.dishId,
+        note: row.note ?? '',
+      })),
+    ])
+  }
+
   function cacheClearWeek(uid: string, weekStart: string): void {
     const plans = cacheGet<PlanRow[]>(uid, 'plans')
     if (plans) {
       cacheSet(uid, 'plans', plans.filter((plan) => plan.weekStart !== weekStart))
+    }
+    const mealPlans = cacheGet<MealPlanRow[]>(uid, 'mealPlans')
+    if (mealPlans) {
+      cacheSet(uid, 'mealPlans', mealPlans.filter((plan) => plan.weekStart !== weekStart))
     }
     const shopping = cacheGet<ShoppingCache>(uid, 'shopping')
     if (shopping && shopping[weekStart]) {
@@ -348,6 +404,9 @@ export function createOfflineAdapter(
         return
       case 'savePlan':
         await base.savePlan(op.row)
+        return
+      case 'replaceDayMeals':
+        await base.replaceDayMeals(op.weekStart, op.day, op.rows)
         return
       case 'clearWeek':
         await base.clearWeek(op.weekStart)
@@ -434,7 +493,9 @@ export function createOfflineAdapter(
 
   function cacheSnapshot(uid: string): Snapshot | null {
     const dishes = cacheGet<Dish[]>(uid, 'dishes')
-    const plans = cacheGet<PlanRow[]>(uid, 'plans')
+    // Si ya estamos en el modelo de N comidas, esa caché es la fuente.
+    const plans =
+      cacheGet<MealPlanRow[]>(uid, 'mealPlans') ?? cacheGet<PlanRow[]>(uid, 'plans')
     if (!dishes || !plans) return null
     const shopping: ShoppingRow[] = Object.entries(shoppingCacheFor(uid)).flatMap(
       ([weekStart, items]) => items.map((item) => ({ ...item, weekStart })),
@@ -659,6 +720,46 @@ export function createOfflineAdapter(
       } catch (error) {
         if (uid && isOfflineError(error, isOnline())) {
           enqueue(uid, { type: 'savePlan', row })
+          return
+        }
+        if (uid) cacheClearUser(uid)
+        throw error
+      }
+    },
+
+    /* --------------------- N comidas por día --------------------- */
+
+    async listMealPlans() {
+      const uid = await ensureUserId()
+      if (!isOnline()) {
+        const cached = uid ? cacheGet<MealPlanRow[]>(uid, 'mealPlans') : null
+        if (cached) return cached
+        throw noCacheError()
+      }
+      try {
+        const rows = await base.listMealPlans()
+        if (uid) cacheSet(uid, 'mealPlans', rows)
+        return rows
+      } catch (error) {
+        const cached = uid ? cacheGet<MealPlanRow[]>(uid, 'mealPlans') : null
+        if (cached && isOfflineError(error, isOnline())) return cached
+        throw error
+      }
+    },
+
+    async replaceDayMeals(weekStart, day, rows) {
+      const uid = await ensureUserId()
+      if (uid) cacheReplaceDayMeals(uid, weekStart, day, rows)
+      if (!isOnline()) {
+        if (!uid) throw noSessionError()
+        enqueue(uid, { type: 'replaceDayMeals', weekStart, day, rows })
+        return
+      }
+      try {
+        await base.replaceDayMeals(weekStart, day, rows)
+      } catch (error) {
+        if (uid && isOfflineError(error, isOnline())) {
+          enqueue(uid, { type: 'replaceDayMeals', weekStart, day, rows })
           return
         }
         if (uid) cacheClearUser(uid)

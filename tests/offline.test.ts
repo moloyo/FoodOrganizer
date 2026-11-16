@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type {
   DataAdapter,
   Dish,
+  MealPlanRow,
   PlanRow,
   SessionUser,
   ShoppingItem,
@@ -96,6 +97,8 @@ function stubAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
     seedDishes: fail,
     listPlans: fail,
     savePlan: fail,
+    listMealPlans: async () => [],
+    replaceDayMeals: async () => {},
     clearWeek: fail,
     listShopping: fail,
     replaceShopping: fail,
@@ -356,5 +359,82 @@ describe('cola de escrituras', () => {
     setOnline(true)
     await adapter.offline?.flush()
     expect(saved.map((item) => item.name)).toEqual(['Faina'])
+  })
+})
+
+describe('cola y caché de N comidas por día', () => {
+  const week = '2026-11-16'
+  const unaComida: MealPlanRow[] = [
+    { weekStart: week, day: 0, slot: 0, mode: 'facil', dishId: 'd1', note: 'nota' },
+  ]
+  const dosComidas: MealPlanRow[] = [
+    ...unaComida,
+    { weekStart: week, day: 0, slot: 1, mode: null, dishId: null, note: '' },
+  ]
+
+  it('encola reemplazar un día y lo sincroniza al volver la red', async () => {
+    const saved: { weekStart: string; day: number; rows: MealPlanRow[] }[] = []
+    const { adapter, setOnline } = harness({
+      replaceDayMeals: async (weekStart, day, rows) => {
+        saved.push({ weekStart, day, rows })
+      },
+    })
+
+    await adapter.getUser()
+    setOnline(false)
+    await adapter.replaceDayMeals(week, 0, unaComida)
+    expect(adapter.offline?.getStatus().pending).toBe(1)
+
+    setOnline(true)
+    await adapter.offline?.flush()
+    expect(saved).toEqual([{ weekStart: week, day: 0, rows: unaComida }])
+    expect(adapter.offline?.getStatus().pending).toBe(0)
+  })
+
+  it('compacta reemplazos repetidos del mismo día', async () => {
+    const saved: MealPlanRow[][] = []
+    const { adapter, setOnline } = harness({
+      replaceDayMeals: async (_weekStart, _day, rows) => {
+        saved.push(rows)
+      },
+    })
+
+    await adapter.getUser()
+    setOnline(false)
+    await adapter.replaceDayMeals(week, 0, unaComida)
+    await adapter.replaceDayMeals(week, 0, dosComidas)
+    expect(adapter.offline?.getStatus().pending).toBe(1)
+
+    setOnline(true)
+    await adapter.offline?.flush()
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toEqual(dosComidas)
+  })
+
+  it('lee las comidas del día desde la caché sin red', async () => {
+    const { adapter, setOnline } = harness({
+      listMealPlans: async () => dosComidas,
+    })
+    setOnline(false)
+    await adapter.getUser()
+    setOnline(true)
+    expect(await adapter.listMealPlans()).toEqual(dosComidas)
+
+    setOnline(false)
+    expect(await adapter.listMealPlans()).toEqual(dosComidas)
+  })
+
+  it('clearWeek limpia también la caché de N comidas', async () => {
+    const { adapter, setOnline } = harness({
+      listMealPlans: async () => dosComidas,
+      clearWeek: async () => {},
+    })
+    setOnline(false)
+    await adapter.getUser()
+    setOnline(true)
+    await adapter.listMealPlans()
+    setOnline(false)
+    await adapter.clearWeek(week)
+    expect(await adapter.listMealPlans()).toEqual([])
   })
 })

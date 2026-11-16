@@ -181,6 +181,14 @@ export interface DataAdapter extends HouseholdAdapter {
   savePlan(row: PlanRow): Promise<void>
   clearWeek(weekStart: string): Promise<void>
 
+  /** N comidas por día: filas planas con `slot`. La UI actual sigue usando los de arriba. */
+  listMealPlans(): Promise<MealPlanRow[]>
+  /**
+   * Reemplaza TODAS las comidas de un día por `rows` (permite agregar, quitar y
+   * reordenar secciones en una sola operación por día).
+   */
+  replaceDayMeals(weekStart: string, day: number, rows: MealPlanRow[]): Promise<void>
+
   listShopping(weekStart: string): Promise<ShoppingItem[]>
   replaceShopping(weekStart: string, items: ShoppingItem[]): Promise<void>
   deleteShoppingItem(id: string): Promise<void>
