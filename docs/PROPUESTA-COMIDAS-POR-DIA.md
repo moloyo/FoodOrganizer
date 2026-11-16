@@ -156,8 +156,20 @@ de planes), ni `households`.
    Supabase de producción, así que un preview con el schema nuevo rompería al cliente
    viejo. Gracias al shim de §10 el orden seguro es: **merge → deploy (funciona con el
    schema viejo) → aplicar la migración** ⇒ sin ventana de caída.
-7. [ ] Aplicar la migración y verificar con dos cuentas temporales; confirmar que los
-   datos actuales siguen intactos.
+7. [x] Merge a `main` (`51eae2e`), migración aplicada en Supabase y verificación con dos
+   cuentas temporales. **Sin ventana de caída** gracias al shim de §10: se desplegó el
+   cliente nuevo contra el schema viejo y recién después se aplicó la migración.
+
+## 12. Cierre (16/11/2026)
+
+- `main` = `51eae2e`, deploy en <https://comidas-pi.vercel.app>.
+- Login público sin errores de consola; bundle con el feature presente.
+- Verificación REST con dos cuentas temporales: 2 comidas en un mismo día (`slot` 0 y 1),
+  nota única en `slot = 0`, ambos miembros leen ambas filas, `anon` ve `[]`, `household_id`
+  ajeno rechazado (`403`), unique `(día, slot)` activo (`409`), y `delete_my_account`
+  limpiando sin perder los datos del otro miembro.
+- La cuenta principal **no se tocó**. Queda la prueba con la pareja en dos dispositivos y,
+  como siempre, la prueba real de offline en el celular.
 
 ## 9. Etapa 2 implementada (solo lógica pura)
 
