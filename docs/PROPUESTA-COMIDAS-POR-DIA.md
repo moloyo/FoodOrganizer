@@ -112,7 +112,9 @@ de planes), ni `households`.
 ## 6. Detalles que decido yo (no requieren respuesta)
 
 - "+" agrega una sección **vacía**: sin dificultad, sin plato, sin nota.
-- Cada sección tiene su **X** para quitarse; al quitar se recompactan los `slot` del día.
+- Cada sección tiene su **✕** para quitarse, **solo cuando el día tiene 2 o más secciones**.
+  Con una sola sección esa ✕ no aparece: el día siempre existe y se conserva la ✕ de la fila
+  del plato ("Quitar plato") tal como funciona hoy. Al quitar se recompactan los `slot`.
 - Reordenar con ↑/↓ se deja para una segunda iteración (el orden de creación alcanza).
 - **Contador y textos:** mientras todos los días tengan 1 sección se conserva literalmente
   **"N de 7 cenas"** y el subtítulo "Solo cenas" (así los 6 tests E2E siguen pasando sin
@@ -137,7 +139,8 @@ de planes), ni `households`.
 
 ## 8. Plan de trabajo en la rama
 
-1. Confirmar este diseño.
+1. Confirmar este diseño con el **boceto visual** `docs/mockup-comidas.html` (HTML estático,
+   sin backend: tema clásico/cool/oscuro, "+", "✕" y chips interactivos).
 2. Tipos + lógica pura + tests (sin tocar Supabase ni la UI).
 3. Migración SQL + adaptador (cloud / local / offline).
 4. UI: `DayCard`, `WeekScreen`, `HistoryScreen`.
